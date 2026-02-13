@@ -161,7 +161,7 @@ export async function refresh(req: Request, res: Response) {
   res.send({ status: 'success', accessToken });
 }
 
-export async function sendVerification(req: Request, res: Response) {
+export async function sendVerificationOtp(req: Request, res: Response) {
   const { email } = req.body;
 
   if (!email) {
@@ -176,7 +176,7 @@ export async function sendVerification(req: Request, res: Response) {
     email,
     otp,
     type: 'verify',
-    expiresAt: new Date(Date.now() + 30 * 1000),
+    expiresAt: new Date(Date.now() + 5 + 30 * 1000),
   });
 
   if (!sendOtp) {
@@ -191,7 +191,7 @@ export async function sendVerification(req: Request, res: Response) {
   });
 }
 
-export async function verifyEmail(req: Request, res: Response) {
+export async function verifyOtp(req: Request, res: Response) {
   const { otp, email } = req.body;
 
   const record = await OTPModel.findOne({ email, type: 'verify' }).sort({
@@ -207,7 +207,7 @@ export async function verifyEmail(req: Request, res: Response) {
     throw createHttpError(400, 'OTP expired.');
   }
 
-  if (record.otp !== otp) {
+  if (Number(record.otp) !== Number(otp)) {
     throw createHttpError(400, 'Invalid OTP');
   }
 
@@ -236,5 +236,139 @@ export async function verifyEmail(req: Request, res: Response) {
     token: {
       accessToken,
     },
+  });
+}
+
+export async function resetPassword(req: Request, res: Response) {
+  const id = req?.user?.sub as string;
+  const { password } = req.body;
+
+  console.log(password);
+
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(password, salt);
+
+  const user = await AuthService.findById(id);
+  if (!user) {
+    throw createHttpError(400, 'user not found');
+  }
+
+  user.password = hashedPassword;
+  await user.save();
+
+  res.status(201).json({
+    status: 'success',
+    message: 'Password update successfully',
+  });
+}
+
+export async function sendVerificationForForgot(req: Request, res: Response) {
+  const { email } = req.body;
+
+  if (!email) {
+    throw createHttpError(400, 'Email is required');
+  }
+
+  const otp = generateOTP();
+
+  await OTPModel.deleteMany({ email, type: 'forgot' });
+
+  const sendOtp = await OTPModel.create({
+    email,
+    otp,
+    type: 'forgot',
+    expiresAt: new Date(Date.now() + 5 + 30 * 1000),
+  });
+
+  if (!sendOtp) {
+    throw createHttpError(400, 'something wrong');
+  }
+
+  await sendOTPEmail(email, otp);
+
+  res.send({
+    status: 'success',
+    message: 'Verification code sent to your email',
+  });
+}
+
+export async function verifyOtpForForgot(req: Request, res: Response) {
+  const { otp, email } = req.body;
+
+  const record = await OTPModel.findOne({ email, type: 'forgot' }).sort({
+    createdAt: -1,
+  });
+
+  if (!record) {
+    throw createHttpError(400, 'OTP not found');
+  }
+
+  if (record.expiresAt < new Date()) {
+    await OTPModel.deleteMany({ email });
+    throw createHttpError(400, 'OTP expired.');
+  }
+
+  if (Number(record.otp) !== Number(otp)) {
+    throw createHttpError(400, 'Invalid OTP');
+  }
+
+  const user = await AuthService.findByEmail(email);
+
+  await user?.updateOne({ isEmailVerified: true });
+
+  const payload = {
+    sub: String(user?._id),
+    role: user?.role,
+  };
+
+  const accessToken = generateAccessTokens(payload);
+  const refreshToken = generateRefreshTokens(payload);
+
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+
+  res.send({
+    status: 'success',
+    message: 'Email verified successfully',
+    token: {
+      accessToken,
+    },
+  });
+}
+
+export async function changePassword(req: Request, res: Response) {
+  const id = req?.user?.sub as string;
+  const { oldPassword, newPassword } = req.body;
+  if (!oldPassword || !newPassword) {
+    throw createHttpError(400, 'Old password and new password required');
+  }
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+  const user = await AuthService.findById(id);
+  if (!user) {
+    throw createHttpError(400, 'user not found');
+  }
+
+  const isMatch = await bcrypt.compare(oldPassword, user.password);
+  if (!isMatch) {
+    throw createHttpError(400, 'Old password incorrect');
+  }
+
+  const isSame = await bcrypt.compare(newPassword, user.password);
+  if (isSame) {
+    throw createHttpError(400, 'New password cannot be same as old password');
+  }
+
+  user.password = hashedPassword;
+  await user.save();
+
+  res.status(201).json({
+    status: 'success',
+    message: 'Password update successfully',
   });
 }

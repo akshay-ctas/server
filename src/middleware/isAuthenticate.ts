@@ -9,6 +9,7 @@ export function isAuthenticate(
   next: NextFunction
 ) {
   const authHeader = req.headers.authorization;
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     throw createHttpError(401, 'authorization denied');
   }

@@ -5,7 +5,7 @@ export class AuthService {
   static async register(user: RegisterInput): Promise<IUser> {
     return User.create(user);
   }
-  //findByEmail
+
   static async findByEmail(email: string): Promise<IUser | null> {
     return User.findOne({ email });
   }
@@ -16,5 +16,8 @@ export class AuthService {
 
   static async findById(id: string): Promise<IUser | null> {
     return User.findById(id);
+  }
+  static async findByIdWithPassword(id: string): Promise<IUser | null> {
+    return User.findById(id).select('+password');
   }
 }
