@@ -1,7 +1,7 @@
 import { IUser, User } from '../users/user.model.js';
 import { RegisterInput } from './validation.js';
 
-export class UserService {
+export class AuthService {
   static async register(user: RegisterInput): Promise<IUser> {
     return User.create(user);
   }

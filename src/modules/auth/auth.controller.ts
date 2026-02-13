@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { UserService } from './auth.service.js';
+import { AuthService } from './auth.service.js';
 import { loginSchema, registerSchema } from './validation.js';
 import createHttpError from 'http-errors';
 import bcrypt from 'bcrypt';
@@ -12,6 +12,8 @@ import {
   generateRefreshTokens,
 } from '../../utils/utils.js';
 import jwt from 'jsonwebtoken';
+import { generateOTP, sendOTPEmail } from '../../utils/transporter.js';
+import { OTPModel } from '../users/otp.model.js';
 
 export const registerUser = async (req: Request, res: Response) => {
   const result = registerSchema.safeParse(req.body);
@@ -35,7 +37,7 @@ export const registerUser = async (req: Request, res: Response) => {
     filename: imageName,
     fileData: image.data,
   });
-  const isEmailExist = await UserService.findByEmail(result?.data?.email);
+  const isEmailExist = await AuthService.findByEmail(result?.data?.email);
   if (isEmailExist) {
     throw createHttpError(400, 'Email already exists!');
   }
@@ -45,7 +47,10 @@ export const registerUser = async (req: Request, res: Response) => {
 
   const user = { ...result.data, password: hashedPassword };
 
-  const registeredUser = await UserService.register(user);
+  const registeredUser = await AuthService.register({
+    ...user,
+    avatar: imageName,
+  });
 
   const safeUser = {
     id: registeredUser._id,
@@ -84,7 +89,7 @@ export const loginUser = async (req: Request, res: Response) => {
 
   const { email, password } = result.data;
 
-  const user = await UserService.findByEmailWithPassword(email);
+  const user = await AuthService.findByEmailWithPassword(email);
   if (!user) {
     throw createHttpError(401, 'Invalid email or password');
   }
@@ -122,7 +127,7 @@ export const loginUser = async (req: Request, res: Response) => {
 
 export async function self(req: Request, res: Response) {
   const id = req?.user?.sub as string;
-  const user = await UserService.findById(id);
+  const user = await AuthService.findById(id);
 
   const userDto = {
     id: user?._id,
@@ -154,4 +159,82 @@ export async function refresh(req: Request, res: Response) {
   const accessToken = generateAccessTokens(payload);
 
   res.send({ status: 'success', accessToken });
+}
+
+export async function sendVerification(req: Request, res: Response) {
+  const { email } = req.body;
+
+  if (!email) {
+    throw createHttpError(400, 'Email is required');
+  }
+
+  const otp = generateOTP();
+
+  await OTPModel.deleteMany({ email, type: 'verify' });
+
+  const sendOtp = await OTPModel.create({
+    email,
+    otp,
+    type: 'verify',
+    expiresAt: new Date(Date.now() + 30 * 1000),
+  });
+
+  if (!sendOtp) {
+    throw createHttpError(400, 'something wrong');
+  }
+
+  await sendOTPEmail(email, otp);
+
+  res.send({
+    status: 'success',
+    message: 'Verification code sent to your email',
+  });
+}
+
+export async function verifyEmail(req: Request, res: Response) {
+  const { otp, email } = req.body;
+
+  const record = await OTPModel.findOne({ email, type: 'verify' }).sort({
+    createdAt: -1,
+  });
+
+  if (!record) {
+    throw createHttpError(400, 'OTP not found');
+  }
+
+  if (record.expiresAt < new Date()) {
+    await OTPModel.deleteMany({ email });
+    throw createHttpError(400, 'OTP expired.');
+  }
+
+  if (record.otp !== otp) {
+    throw createHttpError(400, 'Invalid OTP');
+  }
+
+  const user = await AuthService.findByEmail(email);
+
+  await user?.updateOne({ isEmailVerified: true });
+
+  const payload = {
+    sub: String(user?._id),
+    role: user?.role,
+  };
+
+  const accessToken = generateAccessTokens(payload);
+  const refreshToken = generateRefreshTokens(payload);
+
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+
+  res.send({
+    status: 'success',
+    message: 'Email verified successfully',
+    token: {
+      accessToken,
+    },
+  });
 }

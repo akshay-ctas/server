@@ -1,11 +1,10 @@
-import jwt from 'jsonwebtoken'; // ✅ Named import instead of *
+import jwt from 'jsonwebtoken';
 import { JwtPayload } from '../types/types.js';
 
 export const generateAccessTokens = (payload: JwtPayload): string => {
   const secret = process.env.ACCESS_TOKEN_SECRET as string;
   if (!secret) throw new Error('ACCESS_TOKEN_SECRET is not defined');
 
-  // ✅ TypeScript safe syntax
   return jwt.sign(payload, secret, {
     expiresIn: process.env.ACCESS_TOKEN_EXPIRES_IN || '15m',
   } as jwt.SignOptions);

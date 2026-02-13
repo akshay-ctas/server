@@ -21,5 +21,7 @@ router.post(
 router.post('/login', controller.loginUser);
 router.get('/self', isAuthenticate, controller.self);
 router.get('/refresh', controller.refresh);
+router.post('/send-otp', controller.sendVerification);
+router.post('/verify-email', controller.verifyEmail);
 
 export default router;
