@@ -142,7 +142,10 @@ export async function self(req: Request, res: Response) {
     wishlistCount: user?.wishlist,
   };
 
-  res.send({ status: 'success', user: userDto });
+  res.status(200).json({
+    status: 'success',
+    user: userDto,
+  });
 }
 
 export async function refresh(req: Request, res: Response) {
@@ -158,7 +161,10 @@ export async function refresh(req: Request, res: Response) {
 
   const accessToken = generateAccessTokens(payload);
 
-  res.send({ status: 'success', accessToken });
+  res.status(200).json({
+    status: 'success',
+    accessToken,
+  });
 }
 
 export async function sendVerificationOtp(req: Request, res: Response) {
@@ -185,7 +191,7 @@ export async function sendVerificationOtp(req: Request, res: Response) {
 
   await sendOTPEmail(email, otp);
 
-  res.send({
+  res.status(200).json({
     status: 'success',
     message: 'Verification code sent to your email',
   });
@@ -230,7 +236,7 @@ export async function verifyOtp(req: Request, res: Response) {
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 
-  res.send({
+  res.status(200).json({
     status: 'success',
     message: 'Email verified successfully',
     token: {
@@ -256,7 +262,7 @@ export async function resetPassword(req: Request, res: Response) {
   user.password = hashedPassword;
   await user.save();
 
-  res.status(201).json({
+  res.status(200).json({
     status: 'success',
     message: 'Password update successfully',
   });
@@ -286,7 +292,7 @@ export async function sendVerificationForForgot(req: Request, res: Response) {
 
   await sendOTPEmail(email, otp);
 
-  res.send({
+  res.status(200).json({
     status: 'success',
     message: 'Verification code sent to your email',
   });
@@ -331,7 +337,7 @@ export async function verifyOtpForForgot(req: Request, res: Response) {
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 
-  res.send({
+  res.status(200).json({
     status: 'success',
     message: 'Email verified successfully',
     token: {
@@ -367,7 +373,7 @@ export async function changePassword(req: Request, res: Response) {
   user.password = hashedPassword;
   await user.save();
 
-  res.status(201).json({
+  res.status(200).json({
     status: 'success',
     message: 'Password update successfully',
   });
