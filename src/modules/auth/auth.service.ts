@@ -9,4 +9,12 @@ export class UserService {
   static async findByEmail(email: string): Promise<IUser | null> {
     return User.findOne({ email });
   }
+
+  static async findByEmailWithPassword(email: string): Promise<IUser | null> {
+    return User.findOne({ email }).select('+password');
+  }
+
+  static async findById(id: string): Promise<IUser | null> {
+    return User.findById(id);
+  }
 }

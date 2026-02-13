@@ -6,6 +6,9 @@ declare global {
     interface Request {
       log?: winston.Logger;
       files?: any;
+      user?: {
+        sub: string;
+      };
     }
   }
 }

@@ -1,12 +1,5 @@
 import jwt from 'jsonwebtoken'; // ✅ Named import instead of *
-
-interface JwtPayload {
-  sub: string;
-  role: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-}
+import { JwtPayload } from '../types/types.js';
 
 export const generateAccessTokens = (payload: JwtPayload): string => {
   const secret = process.env.ACCESS_TOKEN_SECRET as string;

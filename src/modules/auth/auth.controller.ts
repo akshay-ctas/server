@@ -6,13 +6,12 @@ import bcrypt from 'bcrypt';
 import { S3Storage } from '../../services/S3Storage.js';
 import { UploadedFile } from 'express-fileupload';
 import { v4 as uuidv4 } from 'uuid';
-import { error } from 'node:console';
-import { User } from '../users/user.model.js';
-import { JwtPayload } from 'jsonwebtoken';
+
 import {
   generateAccessTokens,
   generateRefreshTokens,
 } from '../../utils/utils.js';
+import jwt from 'jsonwebtoken';
 
 export const registerUser = async (req: Request, res: Response) => {
   const result = registerSchema.safeParse(req.body);
@@ -85,12 +84,10 @@ export const loginUser = async (req: Request, res: Response) => {
 
   const { email, password } = result.data;
 
-  const user = await UserService.findByEmail(email);
+  const user = await UserService.findByEmailWithPassword(email);
   if (!user) {
     throw createHttpError(401, 'Invalid email or password');
   }
-
-  console.log(user);
 
   const isMatch = await bcrypt.compare(password, user.password);
   if (!isMatch) {
@@ -100,21 +97,61 @@ export const loginUser = async (req: Request, res: Response) => {
   const payload = {
     sub: String(user._id),
     role: user.role,
-    firstName: user.firstName,
-    lastName: user.lastName,
-    email: user.email,
   };
 
   const accessToken = generateAccessTokens(payload);
   const refreshToken = generateRefreshTokens(payload);
 
   await user.updateOne({ lastLogin: new Date() });
+
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+
   res.status(200).json({
     status: 'success',
     message: 'User logged in successfully',
     token: {
       accessToken,
-      refreshToken,
     },
   });
 };
+
+export async function self(req: Request, res: Response) {
+  const id = req?.user?.sub as string;
+  const user = await UserService.findById(id);
+
+  const userDto = {
+    id: user?._id,
+    firstName: user?.firstName,
+    lastName: user?.lastName,
+    email: user?.email,
+    phone: user?.phone,
+    gender: user?.gender,
+    role: user?.role,
+    avatar: user?.avatar,
+    isEmailVerified: user?.isEmailVerified,
+    wishlistCount: user?.wishlist,
+  };
+
+  res.send({ status: 'success', user: userDto });
+}
+
+export async function refresh(req: Request, res: Response) {
+  const refreshToken = req.cookies.refreshToken;
+
+  if (!refreshToken) {
+    throw createHttpError(401, 'refresh token is missing');
+  }
+
+  const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET!);
+
+  const payload = { sub: decoded.sub as string };
+
+  const accessToken = generateAccessTokens(payload);
+
+  res.send({ status: 'success', accessToken });
+}
