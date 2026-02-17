@@ -1,0 +1,30 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Category {
+  id              String            @id @default(uuid())
+  name            String
+  slug            String            @unique
+  url             String
+  level           Int               @default(0)
+  isActive        Boolean           @default(true)
+  sortOrder       Int               @default(0)
+  imageUrl        String?
+  metaTitle       String?
+  metaDescription String?
+  parentId        String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  parent          Category?         @relation("CatTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children        Category[]        @relation("CatTree")
+  // products        ProductCategory[]
+
+  @@index([parentId])
+  @@index([isActive, sortOrder])
+}

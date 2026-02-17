@@ -115,3 +115,7 @@ Dockerfile.*.local
 
 # Development
 *.dev.env
+
+/src/generated/prisma
+
+/generated/prisma
