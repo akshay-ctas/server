@@ -8,7 +8,6 @@ export default [
   { ignores: ['dist/**', 'node_modules/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
-  ...tseslint.configs.stylistic,
   {
     files: ['**/*.ts'],
     languageOptions: {
@@ -29,8 +28,8 @@ export default [
         'error',
         { argsIgnorePattern: '^_' },
       ],
-      // Allow any in error handlers only
-      '@typescript-eslint/no-explicit-any': 'warn', // Less strict
+      // // Allow any in error handlers only
+      // '@typescript-eslint/no-explicit-any': 'warn', // Less strict
     },
   },
 ];
