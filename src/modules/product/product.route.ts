@@ -1,14 +1,16 @@
-import { NextFunction, Router, Request, Response } from 'express';
-import { CatalogController } from './catalog.controller.js';
-import { isAuthorize } from '../../middleware/isAuthorize.js';
+/* eslint-disable prettier/prettier */
+import { NextFunction, Response, Request, Router } from 'express';
+import { ProductController } from './product.controller.js';
 import { S3Storage } from '../../services/S3Storage.js';
 import fileUpload from 'express-fileupload';
 import createHttpError from 'http-errors';
+import { isAuthorize } from '../../middleware/isAuthorize.js';
 
 const router = Router();
 
 const storage = new S3Storage();
-const catelogController = new CatalogController(storage);
+
+const productController = new ProductController(storage);
 
 router.post(
   '/',
@@ -21,16 +23,10 @@ router.post(
       next(error);
     },
   }),
-  catelogController.createCategory
+  productController.createProduct
 );
-
-router.get('/', catelogController.getCategoriesByIds);
-router.get('/tree', catelogController.categoryTree);
-
-router.get('/all', catelogController.getCategories);
-router.get('/:category_id', catelogController.getCategoryById);
 router.put(
-  '/:category_id',
+  '/:productId',
   isAuthorize,
   fileUpload({
     limits: { fileSize: 500 * 1024 },
@@ -40,8 +36,14 @@ router.put(
       next(error);
     },
   }),
-  catelogController.updateCategory
+  productController.updateProduct
 );
-router.delete('/:category_id', isAuthorize, catelogController.deleteCategory);
+
+router.get(
+  '/',
+  productController.getAllProducts);
+
+  router.get('/:productId', productController.getProductById);
+  router.delete('/:productId', productController.deleteProduct);
 
 export default router;

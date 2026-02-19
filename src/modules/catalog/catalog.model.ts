@@ -68,7 +68,6 @@ const CategorySchema: Schema<ICategory> = new Schema(
       type: String,
     },
 
-    // parent category
     parentId: {
       type: Schema.Types.ObjectId,
       ref: 'Category',
@@ -76,7 +75,6 @@ const CategorySchema: Schema<ICategory> = new Schema(
       index: true,
     },
 
-    // children categories
     children: [
       {
         type: Schema.Types.ObjectId,
@@ -85,11 +83,10 @@ const CategorySchema: Schema<ICategory> = new Schema(
     ],
   },
   {
-    timestamps: true, // createdAt & updatedAt auto
+    timestamps: true,
   }
 );
 
-// compound index like prisma @@index([isActive, sortOrder])
 CategorySchema.index({ isActive: 1, sortOrder: 1 });
 
 export const CategoryModel = mongoose.model<ICategory>(

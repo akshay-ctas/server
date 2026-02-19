@@ -14,6 +14,12 @@ export class CatalogController {
     this.getCategories = this.getCategories.bind(this);
     this.updateCategory = this.updateCategory.bind(this);
     this.deleteCategory = this.deleteCategory.bind(this);
+    this.categoryTree = this.categoryTree.bind(this);
+  }
+
+  async categoryTree(req: Request, res: Response) {
+    const category = await CategoryModel.find();
+    res.json(category);
   }
   async createCategory(req: Request, res: Response) {
     const { name, slug, url, parentId, sortOrder, metaTitle, metaDescription } =
@@ -62,7 +68,11 @@ export class CatalogController {
       metaDescription,
     });
 
-    return res.status(201).json(category);
+    return res.status(200).json({
+      success: true,
+      message: 'Category created successfully',
+      data: category,
+    });
   }
 
   async getCategoryById(req: Request, res: Response) {
@@ -203,7 +213,7 @@ export class CatalogController {
 
     return res.status(200).json({
       success: true,
-      message: 'Category created/updated successfully',
+      message: 'Category updated successfully',
       data: updatedCategory,
     });
   }
