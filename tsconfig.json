@@ -12,6 +12,6 @@
     "typeRoots": ["./src/types", "./node_modules/@types"],
     "lib": ["ES2022"]
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "prisma/**/*", "generated/**/*"],
   "exclude": ["node_modules", "dist"]
 }

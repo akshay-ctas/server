@@ -1,18 +1,19 @@
 import { Request, Response } from 'express';
-import { UserService } from './auth.service.js';
+import { AuthService } from './auth.service.js';
 import { loginSchema, registerSchema } from './validation.js';
 import createHttpError from 'http-errors';
 import bcrypt from 'bcrypt';
 import { S3Storage } from '../../services/S3Storage.js';
 import { UploadedFile } from 'express-fileupload';
 import { v4 as uuidv4 } from 'uuid';
-import { error } from 'node:console';
-import { User } from '../users/user.model.js';
-import { JwtPayload } from 'jsonwebtoken';
+
 import {
   generateAccessTokens,
   generateRefreshTokens,
 } from '../../utils/utils.js';
+import jwt from 'jsonwebtoken';
+import { generateOTP, sendOTPEmail } from '../../utils/transporter.js';
+import { OTPModel } from '../users/otp.model.js';
 
 export const registerUser = async (req: Request, res: Response) => {
   const result = registerSchema.safeParse(req.body);
@@ -36,7 +37,7 @@ export const registerUser = async (req: Request, res: Response) => {
     filename: imageName,
     fileData: image.data,
   });
-  const isEmailExist = await UserService.findByEmail(result?.data?.email);
+  const isEmailExist = await AuthService.findByEmail(result?.data?.email);
   if (isEmailExist) {
     throw createHttpError(400, 'Email already exists!');
   }
@@ -46,7 +47,10 @@ export const registerUser = async (req: Request, res: Response) => {
 
   const user = { ...result.data, password: hashedPassword };
 
-  const registeredUser = await UserService.register(user);
+  const registeredUser = await AuthService.register({
+    ...user,
+    avatar: imageName,
+  });
 
   const safeUser = {
     id: registeredUser._id,
@@ -85,12 +89,10 @@ export const loginUser = async (req: Request, res: Response) => {
 
   const { email, password } = result.data;
 
-  const user = await UserService.findByEmail(email);
+  const user = await AuthService.findByEmailWithPassword(email);
   if (!user) {
     throw createHttpError(401, 'Invalid email or password');
   }
-
-  console.log(user);
 
   const isMatch = await bcrypt.compare(password, user.password);
   if (!isMatch) {
@@ -100,21 +102,279 @@ export const loginUser = async (req: Request, res: Response) => {
   const payload = {
     sub: String(user._id),
     role: user.role,
-    firstName: user.firstName,
-    lastName: user.lastName,
-    email: user.email,
   };
 
   const accessToken = generateAccessTokens(payload);
   const refreshToken = generateRefreshTokens(payload);
 
   await user.updateOne({ lastLogin: new Date() });
+
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+
   res.status(200).json({
     status: 'success',
     message: 'User logged in successfully',
     token: {
       accessToken,
-      refreshToken,
     },
   });
 };
+
+export async function self(req: Request, res: Response) {
+  const id = req?.user?.sub as string;
+  const user = await AuthService.findById(id);
+
+  const userDto = {
+    id: user?._id,
+    firstName: user?.firstName,
+    lastName: user?.lastName,
+    email: user?.email,
+    phone: user?.phone,
+    gender: user?.gender,
+    role: user?.role,
+    avatar: user?.avatar,
+    isEmailVerified: user?.isEmailVerified,
+    wishlistCount: user?.wishlist,
+  };
+
+  res.status(200).json({
+    status: 'success',
+    user: userDto,
+  });
+}
+
+export async function refresh(req: Request, res: Response) {
+  const refreshToken = req.cookies.refreshToken;
+
+  if (!refreshToken) {
+    throw createHttpError(401, 'refresh token is missing');
+  }
+
+  const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET!);
+
+  const payload = { sub: decoded.sub as string };
+
+  const accessToken = generateAccessTokens(payload);
+
+  res.status(200).json({
+    status: 'success',
+    accessToken,
+  });
+}
+
+export async function sendVerificationOtp(req: Request, res: Response) {
+  const { email } = req.body;
+
+  if (!email) {
+    throw createHttpError(400, 'Email is required');
+  }
+
+  const otp = generateOTP();
+
+  await OTPModel.deleteMany({ email, type: 'verify' });
+
+  const sendOtp = await OTPModel.create({
+    email,
+    otp,
+    type: 'verify',
+    expiresAt: new Date(Date.now() + 5 + 30 * 1000),
+  });
+
+  if (!sendOtp) {
+    throw createHttpError(400, 'something wrong');
+  }
+
+  await sendOTPEmail(email, otp);
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Verification code sent to your email',
+  });
+}
+
+export async function verifyOtp(req: Request, res: Response) {
+  const { otp, email } = req.body;
+
+  const record = await OTPModel.findOne({ email, type: 'verify' }).sort({
+    createdAt: -1,
+  });
+
+  if (!record) {
+    throw createHttpError(400, 'OTP not found');
+  }
+
+  if (record.expiresAt < new Date()) {
+    await OTPModel.deleteMany({ email });
+    throw createHttpError(400, 'OTP expired.');
+  }
+
+  if (Number(record.otp) !== Number(otp)) {
+    throw createHttpError(400, 'Invalid OTP');
+  }
+
+  const user = await AuthService.findByEmail(email);
+
+  await user?.updateOne({ isEmailVerified: true });
+
+  const payload = {
+    sub: String(user?._id),
+    role: user?.role,
+  };
+
+  const accessToken = generateAccessTokens(payload);
+  const refreshToken = generateRefreshTokens(payload);
+
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Email verified successfully',
+    token: {
+      accessToken,
+    },
+  });
+}
+
+export async function resetPassword(req: Request, res: Response) {
+  const id = req?.user?.sub as string;
+  const { password } = req.body;
+
+  console.log(password);
+
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(password, salt);
+
+  const user = await AuthService.findById(id);
+  if (!user) {
+    throw createHttpError(400, 'user not found');
+  }
+
+  user.password = hashedPassword;
+  await user.save();
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Password update successfully',
+  });
+}
+
+export async function sendVerificationForForgot(req: Request, res: Response) {
+  const { email } = req.body;
+
+  if (!email) {
+    throw createHttpError(400, 'Email is required');
+  }
+
+  const otp = generateOTP();
+
+  await OTPModel.deleteMany({ email, type: 'forgot' });
+
+  const sendOtp = await OTPModel.create({
+    email,
+    otp,
+    type: 'forgot',
+    expiresAt: new Date(Date.now() + 5 + 30 * 1000),
+  });
+
+  if (!sendOtp) {
+    throw createHttpError(400, 'something wrong');
+  }
+
+  await sendOTPEmail(email, otp);
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Verification code sent to your email',
+  });
+}
+
+export async function verifyOtpForForgot(req: Request, res: Response) {
+  const { otp, email } = req.body;
+
+  const record = await OTPModel.findOne({ email, type: 'forgot' }).sort({
+    createdAt: -1,
+  });
+
+  if (!record) {
+    throw createHttpError(400, 'OTP not found');
+  }
+
+  if (record.expiresAt < new Date()) {
+    await OTPModel.deleteMany({ email });
+    throw createHttpError(400, 'OTP expired.');
+  }
+
+  if (Number(record.otp) !== Number(otp)) {
+    throw createHttpError(400, 'Invalid OTP');
+  }
+
+  const user = await AuthService.findByEmail(email);
+
+  await user?.updateOne({ isEmailVerified: true });
+
+  const payload = {
+    sub: String(user?._id),
+    role: user?.role,
+  };
+
+  const accessToken = generateAccessTokens(payload);
+  const refreshToken = generateRefreshTokens(payload);
+
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Email verified successfully',
+    token: {
+      accessToken,
+    },
+  });
+}
+
+export async function changePassword(req: Request, res: Response) {
+  const id = req?.user?.sub as string;
+  const { oldPassword, newPassword } = req.body;
+  if (!oldPassword || !newPassword) {
+    throw createHttpError(400, 'Old password and new password required');
+  }
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+  const user = await AuthService.findById(id);
+  if (!user) {
+    throw createHttpError(400, 'user not found');
+  }
+
+  const isMatch = await bcrypt.compare(oldPassword, user.password);
+  if (!isMatch) {
+    throw createHttpError(400, 'Old password incorrect');
+  }
+
+  const isSame = await bcrypt.compare(newPassword, user.password);
+  if (isSame) {
+    throw createHttpError(400, 'New password cannot be same as old password');
+  }
+
+  user.password = hashedPassword;
+  await user.save();
+
+  res.status(200).json({
+    status: 'success',
+    message: 'Password update successfully',
+  });
+}

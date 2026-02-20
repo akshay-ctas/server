@@ -72,6 +72,7 @@ const userSchema = new Schema<IUser>(
     password: {
       type: String,
       required: true,
+      select: true,
     },
     phone: String,
     avatar: String,
@@ -95,9 +96,6 @@ const userSchema = new Schema<IUser>(
     timestamps: true,
   }
 );
-
-// Indexes
-userSchema.index({ email: 1 });
 
 const User = mongoose.model<IUser>('User', userSchema);
 
