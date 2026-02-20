@@ -18,6 +18,26 @@ export interface ICategory extends Document {
   updatedAt: Date;
 }
 
+export interface CategoryLean {
+  _id: Types.ObjectId;
+  name: string;
+  slug: string;
+  url: string;
+  level: number;
+  isActive: boolean;
+  sortOrder: number;
+  imageUrl?: string;
+  metaTitle?: string;
+  metaDescription?: string;
+  parentId?: Types.ObjectId | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CategoryTreeNode extends CategoryLean {
+  children: CategoryTreeNode[];
+}
+
 const CategorySchema: Schema<ICategory> = new Schema(
   {
     name: {
@@ -75,18 +95,18 @@ const CategorySchema: Schema<ICategory> = new Schema(
       index: true,
     },
 
-    children: [
-      {
-        type: Schema.Types.ObjectId,
-        ref: 'Category',
-      },
-    ],
+    // children: [
+    //   {
+    //     type: Schema.Types.ObjectId,
+    //     ref: 'Category',
+    //   },
+    // ],
   },
   {
     timestamps: true,
   }
 );
-
+CategorySchema.index({ parentId: 1, sortOrder: 1 });
 CategorySchema.index({ isActive: 1, sortOrder: 1 });
 
 export const CategoryModel = mongoose.model<ICategory>(

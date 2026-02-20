@@ -9,7 +9,8 @@ export function isAuthorize(req: Request, res: Response, next: NextFunction) {
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     throw createHttpError(401, 'authorization denied');
   }
-  const token = authHeader.split(' ')[1];
+  let token = authHeader.split(' ')[1];
+  token = token.replace(/^"|"$/g, '');
 
   const decoded = jwt.verify(
     token as string,

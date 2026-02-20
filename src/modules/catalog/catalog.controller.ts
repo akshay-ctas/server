@@ -3,7 +3,11 @@ import { Request, Response } from 'express';
 import { S3Storage } from '../../services/S3Storage.js';
 import { v4 as uuidv4 } from 'uuid';
 import { UploadedFile } from 'express-fileupload';
-import { CategoryModel } from './catalog.model.js';
+import {
+  CategoryLean,
+  CategoryModel,
+  CategoryTreeNode,
+} from './catalog.model.js';
 import mongoose from 'mongoose';
 
 export class CatalogController {
@@ -18,8 +22,33 @@ export class CatalogController {
   }
 
   async categoryTree(req: Request, res: Response) {
-    const category = await CategoryModel.find();
-    res.json(category);
+    const categories = await CategoryModel.find({ isActive: true })
+      .sort({ sortOrder: 1 })
+      .lean<CategoryLean[]>();
+
+    if (!categories.length) {
+      throw createHttpError(404, 'No categories found');
+    }
+
+    const map: Record<string, CategoryTreeNode> = {};
+    const roots: CategoryTreeNode[] = [];
+
+    for (const cat of categories) {
+      map[cat._id.toString()] = { ...cat, children: [] };
+    }
+
+    for (const cat of categories) {
+      if (cat.parentId) {
+        map[cat.parentId.toString()]?.children.push(map[cat._id.toString()]);
+      } else {
+        roots.push(map[cat._id.toString()]);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      data: roots,
+    });
   }
   async createCategory(req: Request, res: Response) {
     const { name, slug, url, parentId, sortOrder, metaTitle, metaDescription } =
