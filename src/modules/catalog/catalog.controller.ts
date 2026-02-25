@@ -22,7 +22,7 @@ export class CatalogController {
   }
 
   async categoryTree(req: Request, res: Response) {
-    const categories = await CategoryModel.find({ isActive: true })
+    const categories = await CategoryModel.find()
       .sort({ sortOrder: 1 })
       .lean<CategoryLean[]>();
 
@@ -53,7 +53,6 @@ export class CatalogController {
   async createCategory(req: Request, res: Response) {
     const { name, slug, url, parentId, sortOrder, metaTitle, metaDescription } =
       req.body;
-
     const image = req.files!.imageUrl as UploadedFile;
     const imageName = `category_${uuidv4()}`;
 

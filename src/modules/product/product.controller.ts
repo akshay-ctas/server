@@ -1,244 +1,96 @@
 import { Request, Response } from 'express';
-import createHttpError from 'http-errors';
-import { slugifyFn } from '../../utils/utils.js';
-import { Product } from './product.model.js';
-import { S3Storage } from '../../services/S3Storage.js';
-import { v4 as uuidv4 } from 'uuid';
-import { UploadedFile } from 'express-fileupload';
-import mongoose from 'mongoose';
+import { ProductService } from './product.service.js';
+import {
+  CreateProductSchema,
+  productQuerySchema,
+} from './product.validation.js';
 
 export class ProductController {
-  constructor(private storage: S3Storage) {
-    this.createProduct = this.createProduct.bind(this);
-    this.updateProduct = this.updateProduct.bind(this);
-    this.getAllProducts = this.getAllProducts.bind(this);
+  constructor(private productService: ProductService) {
+    this.create = this.create.bind(this);
+    this.get = this.get.bind(this);
   }
+  async create(req: Request, res: Response) {
+    try {
+      const rawBody = this.parseBody(req.body);
 
-  async createProduct(req: Request, res: Response) {
-    const {
-      title,
-      description,
-      price,
-      compareAtPrice,
-      status,
-      tags,
-      sortOrder,
-      categories,
-      metaTitle,
-      metaDescription,
-      publishedAt,
-    } = req.body;
+      console.log(req.body);
 
-    if (!title || !price || !categories || categories.length === 0) {
-      throw createHttpError(400, 'title, price and category are required');
-    }
-
-    let slug = slugifyFn(title);
-
-    const imagename = `Product_${uuidv4()}`;
-    const image = req?.files!.image as UploadedFile;
-
-    await this.storage.upload({
-      fileData: image.data,
-      filename: imagename,
-    });
-
-    const existingSlug = await Product.findOne({ slug });
-    if (existingSlug) {
-      slug = `${slug}-${Date.now()}`;
-    }
-
-    const product = new Product({
-      title,
-      slug,
-      description,
-      price,
-      compareAtPrice: compareAtPrice || 0,
-      status: status || 'DRAFT',
-      tags: tags || [],
-      sortOrder: sortOrder || 0,
-      categories,
-      metaTitle,
-      metaDescription,
-      image: imagename,
-      publishedAt: status === 'ACTIVE' ? publishedAt || new Date() : undefined,
-    });
-
-    await product.save();
-
-    return res.status(201).json({
-      success: true,
-      message: 'Product successfully create ho gaya',
-      data: product,
-    });
-  }
-
-  async updateProduct(req: Request, res: Response) {
-    const productId = req.params.productId as string;
-
-    if (!productId) {
-      throw createHttpError(400, 'productId is not found');
-    }
-    if (!mongoose.Types.ObjectId.isValid(productId)) {
-      throw createHttpError(400, 'Invalid category id');
-    }
-    const {
-      title,
-      description,
-      price,
-      compareAtPrice,
-      status,
-      tags,
-      sortOrder,
-      categories,
-      metaTitle,
-      metaDescription,
-      publishedAt,
-    } = req.body;
-
-    if (!title || !price || !categories || categories.length === 0) {
-      throw createHttpError(400, 'title, price and category are required');
-    }
-
-    let slug = slugifyFn(title);
-
-    let imageName: string | undefined;
-    let oldImage: string | undefined;
-
-    const oldProducts = await Product.findById(productId);
-    if (!oldProducts) {
-      throw createHttpError(400, 'Product is not found');
-    }
-
-    if (req.files?.imageUrl) {
-      oldImage = oldProducts?.image;
-      const image = req.files.image as UploadedFile;
-      imageName = `category_${uuidv4()}`;
-      await this.storage.upload({
-        filename: imageName,
-        fileData: image?.data,
-      });
-      if (oldImage) {
-        await this.storage.delete(oldImage);
+      const validation = CreateProductSchema.safeParse(rawBody);
+      if (!validation.success) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validation.error.flatten(),
+        });
       }
+
+      const imageFiles = Array.isArray(req.files) ? req.files : [];
+      const imagesMeta = req.body.images ? JSON.parse(req.body.images) : [];
+
+      const product = await this.productService.create(
+        { ...validation.data, imagesMeta },
+        imageFiles
+      );
+
+      return res.status(201).json({
+        success: true,
+        message: 'Product created successfully',
+        data: product,
+      });
+    } catch (error: unknown) {
+      console.error('ProductController.create error:', error);
+
+      if (error instanceof Error) {
+        return res.status(500).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error',
+      });
     }
-    const existingSlug = await Product.findOne({ slug });
-    if (existingSlug) {
-      slug = `${slug}-${Date.now()}`;
-    }
-
-    const updatedProduct = await Product.findByIdAndUpdate(
-      productId,
-      {
-        title,
-        slug,
-        description,
-        price,
-        compareAtPrice: compareAtPrice || 0,
-        status: status || 'DRAFT',
-        tags: tags || [],
-        sortOrder: sortOrder || 0,
-        categories,
-        metaTitle,
-        metaDescription,
-        image: imageName,
-        publishedAt:
-          status === 'ACTIVE' ? publishedAt || new Date() : undefined,
-      },
-      { new: true, runValidators: true }
-    );
-
-    await updatedProduct?.save();
-
-    return res.status(201).json({
-      success: true,
-      message: 'Product successfully create ho gaya',
-      data: updatedProduct,
-    });
   }
 
-  async getAllProducts(req: Request, res: Response) {
-    const { page = 1, limit = 10, search, category, status } = req.query;
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const filter: any = {};
-
-    if (search) {
-      filter.title = { $regex: search, $options: 'i' };
+  async get(req: Request, res: Response) {
+    try {
+      const validatedQuery = productQuerySchema.parse(req.query);
+      const result = await this.productService.getAllProducts(validatedQuery);
+      res.status(200).json(result);
+    } catch (error) {
+      res.status(400).json({
+        message: 'Invalid query parameters',
+        error: error.errors || error.message,
+      });
     }
-    if (category) {
-      filter.categories = {
-        $in: [new mongoose.Types.ObjectId(category as string)],
-      };
-    } else {
-      return res
-        .status(400)
-        .json({ success: false, message: 'Invalid Category ID format' });
-    }
-    if (status) {
-      filter.status = status;
-    }
-
-    const skip = (Number(page) - 1) * Number(limit);
-
-    const products = await Product.find(filter)
-      .populate('categories', 'name slug')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(Number(limit));
-
-    const totalProducts = await Product.countDocuments(filter);
-
-    return res.status(200).json({
-      success: true,
-      data: products,
-      pagination: {
-        total: totalProducts,
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(totalProducts / Number(limit)),
-      },
-    });
-  }
-  async getProductById(req: Request, res: Response) {
-    const productId = req.params.productId as string;
-    console.log(productId);
-
-    if (!productId) {
-      throw createHttpError(400, 'productId is not found');
-    }
-    if (!mongoose.Types.ObjectId.isValid(productId)) {
-      throw createHttpError(400, 'Invalid category id');
-    }
-
-    const product = await Product.findById(productId);
-    return res.status(200).json({
-      success: true,
-      data: product,
-    });
   }
 
-  async deleteProduct(req: Request, res: Response) {
-    const productId = req.params.productId as string;
-    console.log(productId);
+  private parseBody(body: Request['body']) {
+    return {
+      ...body,
+      price: Number(body.price),
+      compareAtPrice: body.compareAtPrice
+        ? Number(body.compareAtPrice)
+        : undefined,
+      sortOrder: body.sortOrder ? Number(body.sortOrder) : 0,
+      categories: this.parseArrayField(body.categories),
+      tags: this.parseArrayField(body.tags),
+      variants: body.variants ? JSON.parse(body.variants) : [],
+      images: undefined,
+    };
+  }
 
-    if (!productId) {
-      throw createHttpError(400, 'productId is not found');
+  private parseArrayField(value: unknown): string[] {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    try {
+      const parsed = JSON.parse(value as string);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      return [value as string];
     }
-    if (!mongoose.Types.ObjectId.isValid(productId)) {
-      throw createHttpError(400, 'Invalid category id');
-    }
-
-    const product = await Product.findById(productId);
-    if (!product) {
-      throw createHttpError(400, 'Product not found');
-    }
-    await Product.findByIdAndDelete(productId);
-    if (product?.image) await this.storage.delete(product.image);
-
-    return res.status(200).json({
-      success: true,
-      message: `${product?._id} product deleted`,
-    });
   }
 }

@@ -14,6 +14,7 @@ import {
 import jwt from 'jsonwebtoken';
 import { generateOTP, sendOTPEmail } from '../../utils/transporter.js';
 import { OTPModel } from '../users/otp.model.js';
+import { JwtPayload } from '../../types/types.js';
 
 export const registerUser = async (req: Request, res: Response) => {
   const result = registerSchema.safeParse(req.body);
@@ -37,6 +38,8 @@ export const registerUser = async (req: Request, res: Response) => {
     filename: imageName,
     fileData: image.data,
   });
+  const imagewithurl = await s3Storage.getObjectURI(imageName);
+
   const isEmailExist = await AuthService.findByEmail(result?.data?.email);
   if (isEmailExist) {
     throw createHttpError(400, 'Email already exists!');
@@ -49,7 +52,7 @@ export const registerUser = async (req: Request, res: Response) => {
 
   const registeredUser = await AuthService.register({
     ...user,
-    avatar: imageName,
+    avatar: imagewithurl,
   });
 
   const safeUser = {
@@ -157,7 +160,7 @@ export async function refresh(req: Request, res: Response) {
 
   const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET!);
 
-  const payload = { sub: decoded.sub as string };
+  const payload = { sub: decoded.sub, role: decoded?.role } as JwtPayload;
 
   const accessToken = generateAccessTokens(payload);
 
@@ -248,8 +251,6 @@ export async function verifyOtp(req: Request, res: Response) {
 export async function resetPassword(req: Request, res: Response) {
   const id = req?.user?.sub as string;
   const { password } = req.body;
-
-  console.log(password);
 
   const salt = await bcrypt.genSalt(10);
   const hashedPassword = await bcrypt.hash(password, salt);

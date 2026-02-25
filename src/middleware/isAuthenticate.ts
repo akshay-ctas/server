@@ -14,7 +14,6 @@ export function isAuthenticate(
     throw createHttpError(401, 'authorization denied');
   }
   const token = authHeader.split(' ')[1];
-  console.log(token);
 
   const decoded = jwt.verify(token as string, process.env.ACCESS_TOKEN_SECRET!);
   req.user = {
