@@ -21,8 +21,7 @@ export class S3Service {
     });
 
     this.bucket = process.env.AWS_S3_BUCKET!;
-    this.cdnUrl =
-      process.env.AWS_CDN_URL || `https://${this.bucket}.s3.amazonaws.com`;
+    this.cdnUrl = `https://${this.bucket}.s3.amazonaws.com`;
   }
 
   async upload(

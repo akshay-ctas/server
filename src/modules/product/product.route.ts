@@ -9,5 +9,6 @@ const productService = new ProductService();
 const productController = new ProductController(productService);
 router.post('/', upload.array('files', 10), productController.create);
 router.get('/', productController.get);
+router.patch('/:productId', productController.editProductDetails);
 
 export default router;

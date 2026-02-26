@@ -4,11 +4,13 @@ import {
   CreateProductSchema,
   productQuerySchema,
 } from './product.validation.js';
+import { Product } from './product.model.js';
 
 export class ProductController {
   constructor(private productService: ProductService) {
     this.create = this.create.bind(this);
     this.get = this.get.bind(this);
+    this.editProductDetails = this.editProductDetails.bind(this);
   }
   async create(req: Request, res: Response) {
     try {
@@ -66,6 +68,82 @@ export class ProductController {
         error: error.errors || error.message,
       });
     }
+  }
+
+  async editProductDetails(req: Request, res: Response) {
+    try {
+      const productId = req.params.productId;
+
+      if (!productId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Product ID is required',
+        });
+      }
+
+      const updateData = this.buildUpdateData(req.body);
+
+      const updatedProduct = await Product.findByIdAndUpdate(
+        productId,
+        { $set: updateData },
+        { new: true, runValidators: true }
+      );
+
+      if (!updatedProduct) {
+        return res.status(404).json({
+          success: false,
+          message: 'Product not found',
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Product updated successfully',
+        data: updatedProduct,
+      });
+    } catch (error: any) {
+      console.error('editProductDetails error:', error);
+
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Internal server error',
+      });
+    }
+  }
+
+  private buildUpdateData(body: Request['body']) {
+    const {
+      status,
+      title,
+      metaTitle,
+      metaDescription,
+      description,
+      price,
+      compareAtPrice,
+      sortOrder,
+      tags,
+      categories,
+    } = body;
+
+    const updateData: any = {};
+
+    if (status !== undefined) updateData.status = status;
+    if (title !== undefined) updateData.title = title;
+    if (metaTitle !== undefined) updateData.metaTitle = metaTitle;
+    if (metaDescription !== undefined)
+      updateData.metaDescription = metaDescription;
+    if (description !== undefined) updateData.description = description;
+    if (price !== undefined) updateData.price = Number(price);
+    if (compareAtPrice !== undefined)
+      updateData.compareAtPrice = Number(compareAtPrice);
+    if (sortOrder !== undefined) updateData.sortOrder = Number(sortOrder);
+
+    if (tags !== undefined) updateData.tags = this.parseArrayField(tags);
+
+    if (categories !== undefined)
+      updateData.categories = this.parseArrayField(categories);
+
+    return updateData;
   }
 
   private parseBody(body: Request['body']) {
