@@ -43,6 +43,7 @@ export class ProductService {
         : undefined,
       status: data.status,
       tags: data.tags,
+
       sortOrder: data.sortOrder,
       categories: data.categories.map((id) => new mongoose.Types.ObjectId(id)),
       metaTitle: data.metaTitle,
@@ -50,6 +51,7 @@ export class ProductService {
       publishedAt: data.publishedAt ? new Date(data.publishedAt) : undefined,
       variants: data.variants.map((v) => ({
         ...v,
+        isAvailable: v.stock > 0 ? true : false,
         price: this.toDecimal(v.price),
         compareAtPrice: v.compareAtPrice
           ? this.toDecimal(v.compareAtPrice)

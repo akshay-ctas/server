@@ -49,7 +49,9 @@ export class S3Service {
   ): Promise<string[]> {
     return Promise.all(files.map((f) => this.upload(f, folder)));
   }
-
+  async deleteMany(urls: string[]): Promise<void> {
+    await Promise.all(urls.map((url) => this.delete(url)));
+  }
   async delete(url: string): Promise<void> {
     const key = url.replace(`${this.cdnUrl}/`, '');
     await this.client.send(

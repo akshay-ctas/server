@@ -47,7 +47,7 @@ export interface IProduct extends Document {
 
 const ProductVariantSchema = new Schema<IProductVariant>(
   {
-    sku: { type: String, required: true, unique: true, trim: true },
+    sku: { type: String, trim: true },
     color: { type: String, trim: true },
     metalType: { type: String, trim: true },
     stoneType: { type: String, trim: true },
@@ -120,8 +120,8 @@ const productSchema = new Schema<IProduct>(
 productSchema.index({ slug: 1 });
 productSchema.index({ status: 1, createdAt: -1 });
 productSchema.index({ categories: 1, status: 1 });
-productSchema.index({ 'variants.sku': 1 });
 productSchema.index({ 'images.isPrimary': 1 });
 productSchema.index({ 'images.position': 1 });
+productSchema.index({ 'variants.sku': 1 }, { unique: true, sparse: true });
 
 export const Product = mongoose.model<IProduct>('Product', productSchema);
