@@ -15,7 +15,6 @@ export class CatalogController {
     this.createCategory = this.createCategory.bind(this);
     this.getCategoryById = this.getCategoryById.bind(this);
     this.getCategoriesByIds = this.getCategoriesByIds.bind(this);
-    this.getCategories = this.getCategories.bind(this);
     this.updateCategory = this.updateCategory.bind(this);
     this.deleteCategory = this.deleteCategory.bind(this);
     this.categoryTree = this.categoryTree.bind(this);
@@ -160,21 +159,6 @@ export class CatalogController {
       message: 'Categories fetched successfully',
       count: categories.length,
       data: categories,
-    });
-  }
-
-  async getCategories(req: Request, res: Response) {
-    const category = await CategoryModel.find()
-      .populate({
-        path: 'children',
-        select: 'name slug url level imageUrl sortOrder isActive',
-      })
-      .lean();
-
-    return res.status(200).json({
-      success: true,
-      message: 'Category fetched successfully',
-      data: category,
     });
   }
 

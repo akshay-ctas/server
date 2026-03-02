@@ -79,6 +79,38 @@ export class ProductController {
     }
   }
 
+  async getProductsByCategories(req: Request, res: Response) {
+    const rawCategories = req.query.categories as string;
+
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 8;
+
+    const skip = (page - 1) * limit;
+
+    const categoryIds = Array.isArray(rawCategories)
+      ? rawCategories
+      : rawCategories
+        ? [rawCategories]
+        : [];
+
+    const filter = { categories: { $in: categoryIds }, status: 'ACTIVE' };
+
+    const [products, total] = await Promise.all([
+      Product.find(filter)
+        .populate('categories')
+        .limit(limit)
+        .skip(skip)
+        .sort({ sortOrder: 1 }),
+      Product.countDocuments(filter),
+    ]);
+
+    res.json({
+      products,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+    });
+  }
   async editProductDetails(req: Request, res: Response) {
     try {
       const productId = req.params.productId;
@@ -272,6 +304,46 @@ export class ProductController {
       });
     } catch (error: any) {
       console.error('deleteImage error:', error);
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Internal server error',
+      });
+    }
+  }
+  async deleteProduct(req: Request, res: Response) {
+    try {
+      const { productId } = req.params;
+
+      if (!productId) {
+        res.status(400).json({
+          success: false,
+          message: 'Product ID is required',
+        });
+      }
+
+      const product = await Product.findById(productId);
+
+      if (!product) {
+        return res.status(400).json({
+          success: false,
+          message: 'Product not found',
+        });
+      }
+
+      const imageUrls = product.images?.map((img) => img.url) || [];
+
+      if (imageUrls.length > 0) {
+        await s3Service.deleteMany(imageUrls);
+      }
+
+      await Product.findByIdAndDelete(productId);
+
+      return res.status(200).json({
+        success: true,
+        message: 'Product deleted successfully',
+      });
+    } catch (error: any) {
+      console.error('deleteProduct error:', error);
       return res.status(500).json({
         success: false,
         message: error.message || 'Internal server error',

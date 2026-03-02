@@ -8,7 +8,9 @@ const router = Router();
 const productService = new ProductService();
 const productController = new ProductController(productService);
 router.post('/', upload.array('files', 10), productController.create);
+router.get('/', productController.getProductsByCategories);
 router.get('/', productController.get);
+
 router.patch('/:productId', productController.editProductDetails);
 router.patch('/:productId/variants/:variantId', productController.editVariant);
 router.post(
@@ -30,5 +32,7 @@ router.delete(
   '/:productId/variants/:variantId',
   productController.deleteVariant
 );
+
+router.delete('/:productId', productController.deleteProduct);
 
 export default router;
