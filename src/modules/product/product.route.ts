@@ -8,8 +8,10 @@ const router = Router();
 const productService = new ProductService();
 const productController = new ProductController(productService);
 router.post('/', upload.array('files', 10), productController.create);
+router.get('/all', productController.get);
 router.get('/', productController.getProductsByCategories);
-router.get('/', productController.get);
+router.get('/search', productController.getProductBySearchFilter);
+router.get('/:slug', productController.getProductBySlug);
 
 router.patch('/:productId', productController.editProductDetails);
 router.patch('/:productId/variants/:variantId', productController.editVariant);

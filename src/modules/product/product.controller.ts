@@ -7,6 +7,7 @@ import {
 import { Product } from './product.model.js';
 import { s3Service } from './libs/s3.service.js';
 import mongoose from 'mongoose';
+import createHttpError from 'http-errors';
 
 export class ProductController {
   constructor(private productService: ProductService) {
@@ -79,6 +80,75 @@ export class ProductController {
     }
   }
 
+  async getProductBySlug(req: Request, res: Response) {
+    try {
+      const slug = req.params.slug as string;
+
+      if (!slug) {
+        throw createHttpError(400, 'Slug is required');
+      }
+
+      const product = await Product.findOne({ slug, status: 'ACTIVE' })
+        .populate('categories', 'name slug parentId')
+        .lean();
+
+      if (!product) {
+        throw createHttpError(404, 'Product not found');
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: product,
+      });
+    } catch (error: any) {
+      console.error('getProductBySlug error:', error);
+
+      if (error instanceof createHttpError.HttpError) {
+        return res.status(error.statusCode).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error',
+      });
+    }
+  }
+
+  async getProductBySearchFilter(req: Request, res: Response) {
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 8;
+    const search = req.query.search as string;
+    const skip = (page - 1) * limit;
+
+    const filter: any = {};
+    if (search && search.trim()) {
+      filter.$or = [
+        { title: { $regex: search.trim(), $options: 'i' } },
+        { description: { $regex: search.trim(), $options: 'i' } },
+        { 'variants.sku': { $regex: search.trim(), $options: 'i' } },
+      ];
+    }
+
+    const [products, total] = await Promise.all([
+      Product.find(filter)
+        .populate('categories')
+        .limit(limit)
+        .skip(skip)
+        .sort({ sortOrder: 1 })
+        .lean(),
+      Product.countDocuments(filter),
+    ]);
+
+    res.json({
+      products,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+    });
+  }
   async getProductsByCategories(req: Request, res: Response) {
     const rawCategories = req.query.categories as string;
 
