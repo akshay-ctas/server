@@ -9,6 +9,7 @@ import authRoutes from './modules/auth/auth.routes.js';
 import catalogRoutes from './modules/catalog/catalog.route.js';
 import productRoutes from './modules/product/product.route.js';
 import orderRoutes from './modules/order/order.routes.js';
+import paymentRoutes from './modules/payment/payment.routes.js';
 
 import { requestLogger } from './middleware/logger.js';
 
@@ -31,6 +32,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/categories', catalogRoutes);
 app.use('/api/product', productRoutes);
 app.use('/api/order', orderRoutes);
+app.use('/api/payment', paymentRoutes);
 
 app.use('*', (req, res) => {
   res.status(404).json({ error: 'Not found' });
