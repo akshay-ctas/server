@@ -5,7 +5,7 @@ import { User } from '../users/user.model.js';
 import { Product } from '../product/product.model.js';
 import orderModel from '../order/order.model.js';
 import { razorpayInstance } from '../../config/razorpay.config.js';
-import crypto from 'crypto';
+import paymentModel from '../payment/payment.model.js';
 
 export type CheckoutItem = {
   productId: string;
@@ -111,11 +111,36 @@ export class OrderController {
           receipt: `receipt_${Date.now()}`,
         });
 
+        const payment = await paymentModel.create({
+          userId,
+          method: 'ONLINE',
+          provider: 'razorpay',
+          amount: totalAmount,
+          status: 'created',
+          razorpayOrderId: razorpayOrder.id,
+          metadata: {
+            addressId,
+            cartItems: cart,
+          },
+        });
+
+        const order = await orderModel.create({
+          userId,
+          items,
+          pricing,
+          paymentMethod: 'ONLINE',
+          paymentStatus: 'pending',
+          status: 'pending',
+          shippingAddress,
+        });
+
         return res.status(201).json({
           success: true,
           paymentMethod: 'razorpay',
           razorpayOrderId: razorpayOrder.id,
           amount: totalAmount,
+          orderId: order._id,
+          paymentId: payment._id,
           checkoutSnapshot: { userId, addressId, cart },
         });
       }
@@ -136,10 +161,8 @@ export class OrderController {
           userId,
           items,
           pricing,
-          payment: {
-            method: 'COD',
-            status: 'pending',
-          },
+          paymentMethod: 'COD',
+          paymentStatus: 'pending',
           status: 'confirmed',
           shippingAddress,
         });
@@ -154,6 +177,11 @@ export class OrderController {
     } catch (err: any) {
       return res.status(400).json({ error: err.message });
     }
+  }
+
+  async verifyPrice(req: Request, res: Response) {
+    try {
+    } catch (error) {}
   }
 
   private async verifyCartPrices(

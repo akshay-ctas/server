@@ -15,6 +15,13 @@ router.post(
 );
 
 // router.post(
+//   '/verify-price',
+//   isAuthenticate,
+//   isVerified,
+//   orderController.verifyPrice
+// );
+
+// router.post(
 //   '/payment/verify-payment',
 //   isAuthenticate,
 //   isVerified,
