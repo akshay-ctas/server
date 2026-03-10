@@ -1,11 +1,11 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
-import Razorpay from 'razorpay';
 import { User } from '../users/user.model.js';
 import { Product } from '../product/product.model.js';
 import orderModel from '../order/order.model.js';
 import { razorpayInstance } from '../../config/razorpay.config.js';
 import paymentModel from '../payment/payment.model.js';
+import { OrderResponseDTO } from './dto/order-response.dto.js';
 
 export type CheckoutItem = {
   productId: string;
@@ -86,13 +86,7 @@ export class OrderController {
       const items = verifiedCart.map((item) => ({
         productId: item.productId,
         variantId: item.variantId,
-        title: item.title,
-        slug: item.slug,
-        image: item.image,
-        sku: item.sku,
-        attributes: item.attributes,
         quantity: item.quantity,
-        price: item.price,
         total: item.total,
       }));
 
@@ -179,11 +173,60 @@ export class OrderController {
     }
   }
 
-  async verifyPrice(req: Request, res: Response) {
+  async getById(req: Request, res: Response) {
     try {
-    } catch (error) {}
+      const orderId = req.params.orderId as string;
+
+      if (!mongoose.Types.ObjectId.isValid(orderId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid order id',
+        });
+      }
+
+      const order = await orderModel
+        .findOne({
+          _id: orderId,
+          userId: req.user!.sub,
+        })
+        .populate('userId', 'firstName lastName email wishlist')
+        .populate('items.productId')
+        .populate('items.variantId');
+
+      if (!order) {
+        res.status(400).json({ success: false, message: 'Order not found' });
+      }
+      const dto = OrderResponseDTO.fromOrder(order);
+      return res.status(200).json({ success: true, data: dto });
+    } catch (error) {
+      return res
+        .status(500)
+        .json({ success: false, message: 'Internal Server Error' });
+    }
   }
 
+  async getOrders(req: Request, res: Response) {
+    try {
+      const order = await orderModel
+        .find()
+        .populate('userId', 'firstName lastName email wishlist')
+        .populate('items.productId')
+        .populate('items.variantId');
+
+      if (!order || order.length === 0) {
+        return res
+          .status(404)
+          .json({ success: false, message: 'No orders found' });
+      }
+
+      const dto = OrderResponseDTO.fromOrderArray(order);
+      return res.status(200).json({ success: true, data: dto });
+    } catch (error) {
+      return res
+        .status(500)
+        .json({ success: false, message: 'Internal Server Error' });
+    }
+  }
   private async verifyCartPrices(
     cart: CheckoutItem[]
   ): Promise<VerifyCartResult> {

@@ -12,23 +12,7 @@ const orderItemSchema = new mongoose.Schema({
     required: true,
   },
 
-  title: String,
-  slug: String,
-  image: String,
-  sku: String,
-
-  attributes: {
-    color: String,
-    size: String,
-    metalType: String,
-  },
-
   quantity: {
-    type: Number,
-    required: true,
-  },
-
-  price: {
     type: Number,
     required: true,
   },

@@ -119,6 +119,13 @@ export const loginUser = async (req: Request, res: Response) => {
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 
+  res.cookie('accessToken', accessToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    maxAge: 15 * 60 * 1000,
+  });
+
   res.status(200).json({
     status: 'success',
     message: 'User logged in successfully',
@@ -158,12 +165,20 @@ export async function refresh(req: Request, res: Response) {
     throw createHttpError(401, 'refresh token is missing');
   }
 
-  const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET!);
+  const decoded = jwt.verify(
+    refreshToken,
+    process.env.REFRESH_TOKEN_SECRET!
+  ) as JwtPayload;
 
-  const payload = { sub: decoded.sub, role: decoded?.role } as JwtPayload;
+  const payload = { sub: decoded.sub, role: decoded.role } as JwtPayload;
 
   const accessToken = generateAccessTokens(payload);
-
+  res.cookie('accessToken', accessToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    maxAge: 15 * 60 * 1000,
+  });
   res.status(200).json({
     status: 'success',
     accessToken,
@@ -226,12 +241,17 @@ export async function verifyOtp(req: Request, res: Response) {
 
   const payload = {
     sub: String(user?._id),
-    role: user?.role,
+    role: user?.role ?? 'customer',
   };
 
   const accessToken = generateAccessTokens(payload);
   const refreshToken = generateRefreshTokens(payload);
-
+  res.cookie('accessToken', accessToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    maxAge: 15 * 60 * 1000,
+  });
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
@@ -325,12 +345,17 @@ export async function verifyOtpForForgot(req: Request, res: Response) {
 
   const payload = {
     sub: String(user?._id),
-    role: user?.role,
+    role: user?.role ?? 'customer',
   };
 
   const accessToken = generateAccessTokens(payload);
   const refreshToken = generateRefreshTokens(payload);
-
+  res.cookie('accessToken', accessToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    maxAge: 15 * 60 * 1000,
+  });
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

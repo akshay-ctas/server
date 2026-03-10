@@ -14,18 +14,7 @@ router.post(
   orderController.createOrder
 );
 
-// router.post(
-//   '/verify-price',
-//   isAuthenticate,
-//   isVerified,
-//   orderController.verifyPrice
-// );
-
-// router.post(
-//   '/payment/verify-payment',
-//   isAuthenticate,
-//   isVerified,
-//   orderController.verifyPayment
-// );
+router.get('/:orderId', isAuthenticate, isVerified, orderController.getById);
+router.get('/', isAuthenticate, isVerified, orderController.getOrders);
 
 export default router;
