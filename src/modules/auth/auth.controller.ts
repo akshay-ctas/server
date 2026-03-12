@@ -3,9 +3,6 @@ import { AuthService } from './auth.service.js';
 import { loginSchema, registerSchema } from './validation.js';
 import createHttpError from 'http-errors';
 import bcrypt from 'bcrypt';
-import { S3Storage } from '../../services/S3Storage.js';
-import { UploadedFile } from 'express-fileupload';
-import { v4 as uuidv4 } from 'uuid';
 
 import {
   generateAccessTokens,
@@ -30,15 +27,6 @@ export const registerUser = async (req: Request, res: Response) => {
       })
     );
   }
-  const image = req.files!.avatar as UploadedFile;
-  const imageName = uuidv4();
-
-  const s3Storage = new S3Storage();
-  await s3Storage.upload({
-    filename: imageName,
-    fileData: image.data,
-  });
-  const imagewithurl = await s3Storage.getObjectURI(imageName);
 
   const isEmailExist = await AuthService.findByEmail(result?.data?.email);
   if (isEmailExist) {
@@ -52,7 +40,6 @@ export const registerUser = async (req: Request, res: Response) => {
 
   const registeredUser = await AuthService.register({
     ...user,
-    avatar: imagewithurl,
   });
 
   const safeUser = {
@@ -61,7 +48,6 @@ export const registerUser = async (req: Request, res: Response) => {
     lastName: registeredUser.lastName,
     email: registeredUser.email,
     phone: registeredUser.phone,
-    avatar: imageName,
     gender: registeredUser.gender,
     role: registeredUser.role,
     isEmailVerified: registeredUser.isEmailVerified,
@@ -216,56 +202,52 @@ export async function sendVerificationOtp(req: Request, res: Response) {
 }
 
 export async function verifyOtp(req: Request, res: Response) {
-  const { otp, email } = req.body;
+  try {
+    const { otp, email } = req.body;
+    console.log(otp, email);
 
-  const record = await OTPModel.findOne({ email, type: 'verify' }).sort({
-    createdAt: -1,
-  });
+    const verified = await AuthService.verifyOtp(email, otp);
+    console.log(verified);
 
-  if (!record) {
-    throw createHttpError(400, 'OTP not found');
+    if (!verified) {
+      throw createHttpError(400, 'Invalid or expired OTP');
+    }
+
+    const user = await AuthService.findByEmail(email);
+    console.log(user);
+
+    const payload = {
+      sub: String(user?._id),
+      role: user?.role ?? 'customer',
+    };
+
+    const accessToken = generateAccessTokens(payload);
+    const refreshToken = generateRefreshTokens(payload);
+
+    res.cookie('accessToken', accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+      maxAge: 15 * 60 * 1000, // 15 min
+    });
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Email verified successfully',
+      token: { accessToken },
+    });
+  } catch (error) {
+    if (createHttpError.isHttpError(error)) {
+      throw error;
+    }
+    throw createHttpError(500, 'Internal server error');
   }
-
-  if (record.expiresAt < new Date()) {
-    await OTPModel.deleteMany({ email });
-    throw createHttpError(400, 'OTP expired.');
-  }
-
-  if (Number(record.otp) !== Number(otp)) {
-    throw createHttpError(400, 'Invalid OTP');
-  }
-
-  const user = await AuthService.findByEmail(email);
-
-  await user?.updateOne({ isEmailVerified: true });
-
-  const payload = {
-    sub: String(user?._id),
-    role: user?.role ?? 'customer',
-  };
-
-  const accessToken = generateAccessTokens(payload);
-  const refreshToken = generateRefreshTokens(payload);
-  res.cookie('accessToken', accessToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
-    maxAge: 15 * 60 * 1000,
-  });
-  res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
-
-  res.status(200).json({
-    status: 'success',
-    message: 'Email verified successfully',
-    token: {
-      accessToken,
-    },
-  });
 }
 
 export async function resetPassword(req: Request, res: Response) {

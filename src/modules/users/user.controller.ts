@@ -3,6 +3,8 @@ import z, { ZodError } from 'zod';
 import { IAddress, User } from './user.model.js';
 import mongoose from 'mongoose';
 import { treeifyError } from 'zod/v4/core';
+import { s3Service } from '../product/libs/s3.service.js';
+import { Product } from '../product/product.model.js';
 
 export class UserController {
   constructor() {
@@ -153,6 +155,124 @@ export class UserController {
     } catch (error) {
       console.error('Delete address error:', error);
       res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+
+  async editUser(req: Request, res: Response) {
+    try {
+      const me = req.user;
+      const user = await User.findById(me?.sub).select('-password');
+
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+
+      const { firstName, lastName } = req.body;
+
+      if (firstName !== undefined) user.firstName = firstName.trim();
+      if (lastName !== undefined) user.lastName = lastName.trim();
+
+      if (req.file) {
+        user.avatar = await s3Service.upload(req.file, 'users');
+      }
+
+      await user.save();
+
+      res.status(200).json({
+        message: 'User updated successfully',
+        user,
+      });
+    } catch (error) {
+      console.error('Edit user error:', error);
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+  async getMe(req: Request, res: Response) {
+    try {
+      const me = req.user;
+      const user = await User.findById(me?.sub).select('-password');
+
+      if (!user) {
+        res.status(400).json({ message: 'user not found' });
+      }
+
+      res.status(200).json({
+        message: 'User get successfully',
+        user,
+      });
+    } catch (error) {
+      console.error('Delete address error:', error);
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+  async getwishList(req: Request, res: Response) {
+    try {
+      const userId = req.user?.sub || req.user?.sub;
+      if (!userId) return res.status(401).json({ message: 'Unauthorized' });
+
+      const user = await User.findById(userId).populate({
+        path: 'wishlist',
+        model: 'Product',
+        select: 'title images variants',
+      });
+
+      if (!user) return res.status(404).json({ message: 'User not found' });
+
+      const wishlist = (user.wishlist as any[]).map((product) => {
+        return {
+          productId: product._id.toString(),
+          title: product.title,
+          price: product.variants[0]?.price || 0,
+          image: product.images[0]?.url || '',
+        };
+      });
+
+      return res.status(200).json({
+        message: 'Wishlist fetched successfully',
+        wishlist,
+      });
+    } catch (error) {
+      console.error('Get wishlist error:', error);
+      return res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+  async toggleWishlist(req: Request, res: Response) {
+    try {
+      const userId = req.user?.sub;
+      const productId = req.params.productId as string;
+
+      if (!mongoose.Types.ObjectId.isValid(productId)) {
+        return res.status(400).json({
+          message: 'Invalid product id',
+        });
+      }
+
+      const user = await User.findById(userId);
+
+      if (!user) {
+        return res.status(404).json({
+          message: 'User not found',
+        });
+      }
+
+      const exists = user.wishlist.some((id) => id.toString() === productId);
+      if (exists) {
+        user.wishlist = user.wishlist.filter(
+          (id) => id.toString() !== productId
+        );
+      } else {
+        user.wishlist.push(new mongoose.Types.ObjectId(productId));
+      }
+
+      await user.save();
+
+      res.json({
+        message: exists ? 'Removed from wishlist' : 'Added to wishlist',
+        wishlist: user.wishlist,
+      });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: 'Server error' });
     }
   }
   private validateAddress(data: any): IAddress {
