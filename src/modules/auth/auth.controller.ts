@@ -96,8 +96,6 @@ export const loginUser = async (req: Request, res: Response) => {
   const accessToken = generateAccessTokens(payload);
   const refreshToken = generateRefreshTokens(payload);
 
-  await user.updateOne({ lastLogin: new Date() });
-
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

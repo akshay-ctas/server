@@ -11,6 +11,7 @@ export class UserController {
     this.addAddress = this.addAddress.bind(this);
     this.editAddress = this.editAddress.bind(this);
     this.getAddresses = this.getAddresses.bind(this);
+    this.getUsers = this.getUsers.bind(this);
   }
   async addAddress(req: Request, res: Response) {
     try {
@@ -275,6 +276,86 @@ export class UserController {
       res.status(500).json({ message: 'Server error' });
     }
   }
+
+  async clearWishlist(req: Request, res: Response) {
+    try {
+      const userId = req.user?.sub;
+
+      const updatedUser = await User.findByIdAndUpdate(
+        userId,
+        { $set: { wishlist: [] } },
+        { new: true }
+      );
+
+      if (!updatedUser) {
+        return res.status(404).json({
+          message: 'User not found',
+        });
+      }
+      res.status(200).json({
+        message: 'WishList is cleared',
+      });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: 'Server error' });
+    }
+  }
+
+  async getUsers(req: Request, res: Response) {
+    try {
+      const validatedQuery = this.userQuerySchema(req.query as any);
+      const { page, limit, search, sortBy, sortOrder, isActive } =
+        validatedQuery;
+
+      const skip = (page - 1) * limit;
+
+      const filter: any = {};
+
+      if (isActive !== undefined) {
+        filter.isActive = isActive;
+      }
+
+      if (search) {
+        filter.$or = [
+          { firstName: { $regex: search, $options: 'i' } },
+          { lastName: { $regex: search, $options: 'i' } },
+          { email: { $regex: search, $options: 'i' } },
+        ];
+      }
+      console.log(sortBy, sortOrder);
+
+      const [users, total] = await Promise.all([
+        User.find(filter)
+          .select('-password')
+          .sort({ [sortBy]: sortOrder === 'asc' ? 1 : -1 })
+          .skip(skip)
+          .limit(limit),
+
+        User.countDocuments(filter),
+      ]);
+      const totalPages = Math.ceil(total / limit);
+      const hasNextPage = page < totalPages;
+      const hasPrevPage = page > 1;
+      res.status(200).json({
+        data: users,
+        meta: {
+          total,
+          page,
+          limit,
+          totalPages,
+          hasNextPage,
+          hasPrevPage,
+        },
+      });
+    } catch (error) {
+      console.error('GetUsers error:', error);
+
+      res.status(500).json({
+        message: 'Server error',
+        error: error instanceof Error ? error.message : error,
+      });
+    }
+  }
   private validateAddress(data: any): IAddress {
     const schema = z.object({
       type: z.enum(['shipping', 'billing']).default('shipping'),
@@ -289,6 +370,26 @@ export class UserController {
       isDefault: z.boolean().optional(),
     });
 
+    return schema.parse(data);
+  }
+  private userQuerySchema(data: any) {
+    const schema = z.object({
+      page: z.coerce.number().min(1).default(1),
+      limit: z.coerce.number().min(1).max(100).default(10),
+      search: z.string().optional(),
+      sortBy: z
+        .enum(['createdAt', 'lastLogin', 'firstName', 'email'])
+        .default('lastLogin'),
+      sortOrder: z.enum(['asc', 'desc']).default('desc'),
+      isActive: z
+        .enum(['true', 'false'])
+        .optional()
+        .transform((val) => {
+          if (val === 'true') return true;
+          if (val === 'false') return undefined;
+          return undefined;
+        }),
+    });
     return schema.parse(data);
   }
 }

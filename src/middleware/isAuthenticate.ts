@@ -2,8 +2,9 @@ import jwt from 'jsonwebtoken';
 import { JwtPayload } from '../types/types.js';
 import { NextFunction, Response, Request } from 'express';
 import createHttpError from 'http-errors';
+import { User } from '../modules/users/user.model.js';
 
-export function isAuthenticate(
+export async function isAuthenticate(
   req: Request,
   res: Response,
   next: NextFunction
@@ -19,6 +20,8 @@ export function isAuthenticate(
   req.user = {
     sub: decoded.sub,
   } as JwtPayload;
-
+  await User.findByIdAndUpdate(decoded.sub, {
+    lastLogin: new Date(),
+  });
   next();
 }

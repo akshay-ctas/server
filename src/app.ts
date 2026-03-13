@@ -3,6 +3,7 @@ import 'express-async-errors';
 import cors from 'cors';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
+import http from 'http';
 
 import userRoutes from './modules/users/user.routes.js';
 import authRoutes from './modules/auth/auth.routes.js';

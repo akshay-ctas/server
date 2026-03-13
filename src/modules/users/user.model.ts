@@ -1,4 +1,6 @@
 import mongoose, { Document, Schema } from 'mongoose';
+import { HydratedDocument } from 'mongoose';
+import { CallbackWithoutResultAndOptionalError } from 'mongoose';
 
 export interface IAddress {
   type: 'shipping' | 'billing';
@@ -67,10 +69,11 @@ const userSchema = new Schema<IUser>(
       trim: true,
       match: /^\S+@\S+\.\S+$/,
     },
+
     password: {
       type: String,
       required: true,
-      select: true,
+      select: false,
     },
     phone: String,
     avatar: String,
@@ -95,6 +98,15 @@ const userSchema = new Schema<IUser>(
   }
 );
 
+type UserDocument = HydratedDocument<IUser>;
+
+userSchema.pre('save', async function (this: UserDocument) {
+  const defaultAddresses = this.addresses.filter((a) => a.isDefault);
+
+  if (defaultAddresses.length > 1) {
+    throw new Error('Only one default address allowed');
+  }
+});
 const User = mongoose.model<IUser>('User', userSchema);
 
 export { User };
