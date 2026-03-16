@@ -6,6 +6,8 @@ import orderModel from '../order/order.model.js';
 import { razorpayInstance } from '../../config/razorpay.config.js';
 import paymentModel from '../payment/payment.model.js';
 import { OrderResponseDTO } from './dto/order-response.dto.js';
+import z from 'zod';
+import { OrderService } from './order.service.js';
 
 export type CheckoutItem = {
   productId: string;
@@ -43,8 +45,9 @@ type VerifyCartResult = {
 };
 
 export class OrderController {
-  constructor() {
+  constructor(private orderService: OrderService) {
     this.createOrder = this.createOrder.bind(this);
+    this.getOrderDetail = this.getOrderDetail.bind(this);
   }
 
   async createOrder(req: Request, res: Response) {
@@ -140,17 +143,6 @@ export class OrderController {
       }
 
       if (paymentMethod === 'cash') {
-        console.log(paymentMethod, {
-          userId,
-          items,
-          pricing,
-          payment: {
-            method: 'COD',
-            status: 'pending',
-          },
-          status: 'confirmed',
-          shippingAddress,
-        });
         const order = await orderModel.create({
           userId,
           items,
@@ -205,7 +197,7 @@ export class OrderController {
     }
   }
 
-  async getOrders(req: Request, res: Response) {
+  async getMyOrders(req: Request, res: Response) {
     try {
       const order = await orderModel
         .find()
@@ -225,6 +217,70 @@ export class OrderController {
       return res
         .status(500)
         .json({ success: false, message: 'Internal Server Error' });
+    }
+  }
+
+  // async getOrderDetail(req: Request, res: Response) {
+  //   try {
+  //     const orderId = req.params.orderId as string;
+
+  //     if (!orderId) {
+  //       return res.status(400).json({
+  //         success: false,
+  //         message: 'Order ID is required',
+  //       });
+  //     }
+
+  //     const order = await this.orderService.getOrderDetails(orderId);
+
+  //     return res.status(200).json({
+  //       success: true,
+  //       data: order,
+  //     });
+  //   } catch (error: any) {
+  //     console.error('ERROR NAME:', error.name);
+  //     console.error('ERROR MESSAGE:', error.message);
+  //     console.error('ERROR STACK:', error.stack);
+
+  //     // Invalid ID format
+  //     if (error.message === 'Invalid order ID') {
+  //       return res.status(400).json({
+  //         success: false,
+  //         message: error.message,
+  //       });
+  //     }
+
+  //     // Order not found
+  //     if (error.message === 'Order not found') {
+  //       return res.status(404).json({
+  //         success: false,
+  //         message: error.message,
+  //       });
+  //     }
+
+  //     // Server error
+  //     console.error('getOrderDetails error:', error);
+  //     return res.status(500).json({
+  //       success: false,
+  //       message: 'Internal server error',
+  //     });
+  //   }
+  // }
+
+  async getAllOrders(req: Request, res: Response) {
+    try {
+      const userId = req.user.sub;
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 10;
+
+      const result = await this.orderService.getAllOrders(userId, page, limit);
+
+      return res.status(200).json({ success: true, ...result });
+    } catch (error) {
+      console.error('getAllOrders error:', error);
+      return res
+        .status(500)
+        .json({ success: false, message: 'Internal server error' });
     }
   }
   private async verifyCartPrices(
@@ -311,5 +367,26 @@ export class OrderController {
         throw new Error(`Invalid quantity for productId: ${item.productId}`);
       }
     }
+  }
+
+  private userQuerySchema(data: any) {
+    const schema = z.object({
+      page: z.coerce.number().min(1).default(1),
+      limit: z.coerce.number().min(1).max(100).default(10),
+      search: z.string().optional(),
+      sortBy: z
+        .enum(['createdAt', 'lastLogin', 'firstName', 'email'])
+        .default('lastLogin'),
+      sortOrder: z.enum(['asc', 'desc']).default('desc'),
+      isActive: z
+        .enum(['true', 'false'])
+        .optional()
+        .transform((val) => {
+          if (val === 'true') return true;
+          if (val === 'false') return undefined;
+          return undefined;
+        }),
+    });
+    return schema.parse(data);
   }
 }

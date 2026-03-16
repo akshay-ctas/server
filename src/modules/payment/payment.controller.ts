@@ -100,8 +100,6 @@ export class PaymentController {
   }
 
   async refundPayment(req: Request, res: Response) {
-    console.log('Refund request received:', req.params.paymentId, req.body);
-
     const session = await mongoose.startSession();
     session.startTransaction();
 

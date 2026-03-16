@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import z, { ZodError } from 'zod';
+import z, { success, ZodError } from 'zod';
 import { IAddress, User } from './user.model.js';
 import mongoose from 'mongoose';
 import { treeifyError } from 'zod/v4/core';
@@ -12,13 +12,11 @@ export class UserController {
     this.editAddress = this.editAddress.bind(this);
     this.getAddresses = this.getAddresses.bind(this);
     this.getUsers = this.getUsers.bind(this);
+    this.addUser = this.addUser.bind(this);
   }
   async addAddress(req: Request, res: Response) {
     try {
       const userId = req.params.id as string;
-
-      console.log('userId', userId);
-      console.log('body', req.body);
 
       if (!mongoose.Types.ObjectId.isValid(userId)) {
         return res.status(400).json({ message: 'Invalid user ID' });
@@ -322,7 +320,6 @@ export class UserController {
           { email: { $regex: search, $options: 'i' } },
         ];
       }
-      console.log(sortBy, sortOrder);
 
       const [users, total] = await Promise.all([
         User.find(filter)
@@ -355,6 +352,184 @@ export class UserController {
         error: error instanceof Error ? error.message : error,
       });
     }
+  }
+
+  async addUser(req: Request, res: Response) {
+    try {
+      const result = this.validateAddUser(req.body);
+
+      if (!result.success) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: result.error.flatten().fieldErrors,
+        });
+      }
+
+      const bodyData = result.data;
+
+      const existingUser = await User.findOne({ email: bodyData.email });
+
+      if (existingUser) {
+        return res.status(409).json({
+          success: false,
+          message: 'Email already exists',
+        });
+      }
+
+      const user = await User.create(bodyData);
+
+      return res.status(201).json({
+        success: true,
+        message: `${user.firstName} ${user.lastName} added successfully.`,
+        data: {
+          id: user._id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          email: user.email,
+          phone: user.phone,
+        },
+      });
+    } catch (error) {
+      console.error('AddUser error:', error);
+
+      return res.status(500).json({
+        success: false,
+        message: 'Server error',
+      });
+    }
+  }
+
+  async getUserById(req: Request, res: Response) {
+    try {
+      const userId = req.params.userId as string;
+      if (!mongoose.Types.ObjectId.isValid(userId)) {
+        return res
+          .status(400)
+          .json({ success: false, message: 'Invalid user id' });
+      }
+      const user = await User.findById(userId).populate({
+        path: 'wishlist',
+        model: 'Product',
+        select: 'title images variants',
+      });
+
+      res.status(200).json({
+        success: true,
+        message: 'user get successfully',
+        user,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Server error',
+      });
+    }
+  }
+
+  async editUserById(req: Request, res: Response) {
+    try {
+      const userId = req.params.userId as string;
+      const { firstName, lastName, email, phone, role, gender, isActive } =
+        req.body;
+
+      if (!mongoose.Types.ObjectId.isValid(userId)) {
+        return res
+          .status(400)
+          .json({ success: false, message: 'Invalid user id' });
+      }
+
+      if (email) {
+        const emailConflict = await User.findOne({
+          email,
+          _id: { $ne: userId },
+        });
+
+        if (emailConflict) {
+          return res.status(409).json({
+            success: false,
+            message: 'Email is already taken by another account',
+          });
+        }
+      }
+
+      await User.findByIdAndUpdate(
+        { _id: userId },
+        {
+          firstName,
+          lastName,
+          email,
+          phone,
+          role,
+          gender,
+          isActive,
+        },
+        { new: true, runValidators: true }
+      );
+      res.status(200).json({
+        success: true,
+        message: 'user updated successfully',
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Server error',
+      });
+    }
+  }
+
+  async deleteUserById(req: Request, res: Response) {
+    try {
+      const userId = req.params.userId as string;
+
+      if (!mongoose.Types.ObjectId.isValid(userId)) {
+        return res
+          .status(400)
+          .json({ success: false, message: 'Invalid user id' });
+      }
+
+      await User.findByIdAndDelete({ _id: userId });
+      res.status(200).json({
+        success: true,
+        message: 'user deleted successfully',
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: 'Server error',
+      });
+    }
+  }
+  private validateAddUser(data: any) {
+    const schema = z.object({
+      firstName: z
+        .string({ error: 'First name is required' })
+        .min(2, { error: 'First name must be at least 2 characters' })
+        .max(50, { error: 'First name too long' })
+        .trim(),
+
+      lastName: z
+        .string({ error: 'Last name is required' })
+        .min(2, { error: 'Last name must be at least 2 characters' })
+        .max(50, { error: 'Last name too long' })
+        .trim(),
+
+      email: z
+        .string({ error: 'Email is required' })
+        .email({ error: 'Invalid email format' })
+        .toLowerCase()
+        .trim(),
+
+      password: z
+        .string({ error: 'Password is required' })
+        .min(6, { error: 'Password must be minimum 6 characters' }),
+
+      phone: z
+        .string()
+        .regex(/^\+?[\d\s-]{10,15}$/, { error: 'Invalid phone number' })
+        .optional(),
+    });
+    return schema.safeParse(data);
   }
   private validateAddress(data: any): IAddress {
     const schema = z.object({

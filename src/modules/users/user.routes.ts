@@ -50,6 +50,21 @@ router.post(
 
 router.post('/wishlist', isAuthenticate, userController.clearWishlist);
 
-router.get('/', userController.getUsers);
+// Admin
+router.get('/', isAuthenticate, isAuthorize, userController.getUsers);
+router.post('/add-user', isAuthenticate, isAuthorize, userController.addUser);
+router.get('/:userId', isAuthenticate, isAuthorize, userController.getUserById);
+router.patch(
+  '/:userId',
+  isAuthenticate,
+  isAuthorize,
+  userController.editUserById
+);
 
+router.delete(
+  '/:userId',
+  isAuthenticate,
+  isAuthorize,
+  userController.deleteUserById
+);
 export default router;

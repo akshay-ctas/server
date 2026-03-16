@@ -202,17 +202,14 @@ export async function sendVerificationOtp(req: Request, res: Response) {
 export async function verifyOtp(req: Request, res: Response) {
   try {
     const { otp, email } = req.body;
-    console.log(otp, email);
 
     const verified = await AuthService.verifyOtp(email, otp);
-    console.log(verified);
 
     if (!verified) {
       throw createHttpError(400, 'Invalid or expired OTP');
     }
 
     const user = await AuthService.findByEmail(email);
-    console.log(user);
 
     const payload = {
       sub: String(user?._id),
