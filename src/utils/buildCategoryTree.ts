@@ -19,12 +19,11 @@ const buildCategoryTree = (categoryPaths: Category[][]): CategoryTreeNode[] => {
   const root: Record<string, CategoryTreeNodeInternal> = {};
 
   for (const path of categoryPaths) {
-    if (!path || !Array.isArray(path)) continue; // ✅ null path guard
+    if (!path || !Array.isArray(path)) continue;
 
     let currentLevel = root;
 
     for (const category of path) {
-      // ✅ category ya _id undefined ho toh skip karo
       if (!category || !category._id || !category.name) continue;
 
       const id = category._id.toString();

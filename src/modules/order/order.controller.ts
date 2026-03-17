@@ -18,7 +18,7 @@ export type CheckoutItem = {
 export type CheckoutData = {
   userId: string;
   addressId: string;
-  paymentMethod: 'razorpay' | 'cash';
+  paymentMethod: 'online' | 'cash';
   cart: CheckoutItem[];
 };
 
@@ -47,6 +47,7 @@ type VerifyCartResult = {
 export class OrderController {
   constructor(private orderService: OrderService) {
     this.createOrder = this.createOrder.bind(this);
+    this.getAllOrders = this.getAllOrders.bind(this);
     this.getOrderDetail = this.getOrderDetail.bind(this);
   }
 
@@ -101,7 +102,7 @@ export class OrderController {
         total: totalAmount,
       };
 
-      if (paymentMethod === 'razorpay') {
+      if (paymentMethod === 'online') {
         const razorpayOrder = await razorpayInstance.orders.create({
           amount: Math.round(totalAmount * 100),
           currency: 'INR',
@@ -133,7 +134,7 @@ export class OrderController {
 
         return res.status(201).json({
           success: true,
-          paymentMethod: 'razorpay',
+          paymentMethod: 'online',
           razorpayOrderId: razorpayOrder.id,
           amount: totalAmount,
           orderId: order._id,
@@ -220,60 +221,64 @@ export class OrderController {
     }
   }
 
-  // async getOrderDetail(req: Request, res: Response) {
-  //   try {
-  //     const orderId = req.params.orderId as string;
+  async getOrderDetail(req: Request, res: Response) {
+    try {
+      const orderId = req.params.orderId as string;
 
-  //     if (!orderId) {
-  //       return res.status(400).json({
-  //         success: false,
-  //         message: 'Order ID is required',
-  //       });
-  //     }
+      if (!orderId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Order ID is required',
+        });
+      }
 
-  //     const order = await this.orderService.getOrderDetails(orderId);
+      const order = await this.orderService.getOrderDetails(orderId);
 
-  //     return res.status(200).json({
-  //       success: true,
-  //       data: order,
-  //     });
-  //   } catch (error: any) {
-  //     console.error('ERROR NAME:', error.name);
-  //     console.error('ERROR MESSAGE:', error.message);
-  //     console.error('ERROR STACK:', error.stack);
+      return res.status(200).json({
+        success: true,
+        data: order,
+      });
+    } catch (error: any) {
+      if (error.message === 'Invalid order ID') {
+        return res.status(400).json({
+          success: false,
+          message: error.message,
+        });
+      }
 
-  //     // Invalid ID format
-  //     if (error.message === 'Invalid order ID') {
-  //       return res.status(400).json({
-  //         success: false,
-  //         message: error.message,
-  //       });
-  //     }
+      if (error.message === 'Order not found') {
+        return res.status(404).json({
+          success: false,
+          message: error.message,
+        });
+      }
 
-  //     // Order not found
-  //     if (error.message === 'Order not found') {
-  //       return res.status(404).json({
-  //         success: false,
-  //         message: error.message,
-  //       });
-  //     }
-
-  //     // Server error
-  //     console.error('getOrderDetails error:', error);
-  //     return res.status(500).json({
-  //       success: false,
-  //       message: 'Internal server error',
-  //     });
-  //   }
-  // }
+      console.error('getOrderDetails error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error',
+      });
+    }
+  }
 
   async getAllOrders(req: Request, res: Response) {
     try {
-      const userId = req.user.sub;
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 10;
 
-      const result = await this.orderService.getAllOrders(userId, page, limit);
+      const status = req.query.status as string | undefined;
+      const paymentStatus = req.query.paymentStatus as string | undefined;
+      const paymentMethod = req.query.paymentMethod as string | undefined;
+      const search = req.query.search as string | undefined;
+
+      const result = await this.orderService.getAllOrders(
+        page,
+        limit,
+        status,
+        paymentStatus,
+        search,
+        paymentMethod
+      );
 
       return res.status(200).json({ success: true, ...result });
     } catch (error) {
@@ -347,7 +352,7 @@ export class OrderController {
     if (!mongoose.Types.ObjectId.isValid(addressId)) {
       throw new Error('Invalid addressId.');
     }
-    if (!['razorpay', 'cash'].includes(paymentMethod)) {
+    if (!['online', 'cash'].includes(paymentMethod)) {
       throw new Error('Invalid payment method.');
     }
     if (!Array.isArray(cart) || cart.length === 0) {

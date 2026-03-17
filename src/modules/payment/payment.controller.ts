@@ -70,7 +70,7 @@ export class PaymentController {
         orderId,
         {
           paymentStatus: 'paid',
-          paymentMethod: 'razorpay',
+          paymentMethod: 'ONLINE',
           status: 'confirmed',
         },
         { new: true, session }

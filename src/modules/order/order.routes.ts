@@ -18,10 +18,10 @@ router.post(
   orderController.createOrder
 );
 
-router.get('/:orderId', isAuthenticate, isVerified, orderController.getById);
-router.get('/', isAuthenticate, isVerified, orderController.getMyOrders);
-
-// admin
+router.get('/admin', orderController.getAllOrders);
 router.get('/admin/:orderId', orderController.getOrderDetail);
+router.get('/:orderId', isAuthenticate, isVerified, orderController.getById);
+
+router.get('/', isAuthenticate, isVerified, orderController.getMyOrders);
 
 export default router;
