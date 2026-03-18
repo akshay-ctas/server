@@ -58,6 +58,7 @@ export class PaymentController {
         {
           razorpayPaymentId: razorpay_payment_id,
           razorpaySignature: razorpay_signature,
+          orderId,
           status: 'success',
         },
         { new: true, session }

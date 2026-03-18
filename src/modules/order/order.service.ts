@@ -1,9 +1,6 @@
 import mongoose from 'mongoose';
 import orderModel from './order.model.js';
 import { PipelineStage } from 'mongoose';
-import buildCategoryTree from '../../utils/buildCategoryTree.js';
-import { Product } from '../product/product.model.js';
-import { CategoryModel } from '../catalog/catalog.model.js';
 
 export class OrderService {
   async getAllOrders(
@@ -20,62 +17,29 @@ export class OrderService {
 
     if (status) matchStage.status = status;
     if (paymentStatus) matchStage.paymentStatus = paymentStatus;
-    if (paymentMethod) {
-      matchStage.paymentMethod = paymentMethod.trim().toUpperCase();
-    }
-    if (search && mongoose.Types.ObjectId.isValid(search)) {
-      matchStage._id = new mongoose.Types.ObjectId(search);
-    }
-
-    const titleMatchStage: PipelineStage[] =
-      search && !mongoose.Types.ObjectId.isValid(search)
-        ? [
-            {
-              $match: {
-                firstProductTitle: { $regex: search, $options: 'i' },
-              },
-            },
-          ]
-        : [];
+    if (paymentMethod) matchStage.paymentMethod = paymentMethod;
 
     const basePipeline: PipelineStage[] = [
       { $match: matchStage },
-
-      { $unwind: '$items' },
-
+      {
+        $set: {
+          firstItem: { $first: { $ifNull: ['$items', []] } },
+          itemCount: { $size: { $ifNull: ['$items', []] } },
+        },
+      },
       {
         $lookup: {
           from: 'products',
-          localField: 'items.productId',
+          localField: 'firstItem.productId',
           foreignField: '_id',
           as: 'product',
         },
       },
-      { $set: { product: { $first: '$product' } } },
-
       {
         $set: {
-          firstImage: {
-            $let: {
-              vars: {
-                img: {
-                  $first: {
-                    $sortArray: {
-                      input: { $ifNull: ['$product.images', []] },
-                      sortBy: { position: 1 },
-                    },
-                  },
-                },
-              },
-              in: {
-                url: '$$img.url',
-                altText: '$$img.altText',
-              },
-            },
-          },
+          product: { $first: '$product' },
         },
       },
-
       {
         $lookup: {
           from: 'users',
@@ -84,39 +48,54 @@ export class OrderService {
           as: 'user',
         },
       },
-      { $set: { user: { $first: '$user' } } },
-
       {
-        $group: {
-          _id: '$_id',
-          status: { $first: '$status' },
-          paymentStatus: { $first: '$paymentStatus' },
-          paymentMethod: { $first: '$paymentMethod' },
-          pricing: { $first: '$pricing' },
-          createdAt: { $first: '$createdAt' },
-          shippingAddress: { $first: '$shippingAddress' },
-          itemCount: { $sum: 1 },
-          firstItemImage: { $first: '$firstImage' },
-          firstProductTitle: { $first: '$product.title' },
-          user: {
-            $first: {
-              _id: '$user._id',
-              name: '$user.name',
-              email: '$user.email',
-              phone: '$user.phone',
+        $set: {
+          user: { $first: '$user' },
+        },
+      },
+      {
+        $set: {
+          firstImage: {
+            $let: {
+              vars: {
+                variantImage: {
+                  $first: {
+                    $filter: {
+                      input: { $ifNull: ['$product.images', []] },
+                      as: 'img',
+                      cond: {
+                        $eq: ['$$img._id', '$firstItem.variantId'],
+                      },
+                    },
+                  },
+                },
+                primaryImage: {
+                  $first: {
+                    $filter: {
+                      input: { $ifNull: ['$product.images', []] },
+                      as: 'img',
+                      cond: {
+                        $eq: ['$$img.isPrimary', true],
+                      },
+                    },
+                  },
+                },
+                firstImageFromArray: {
+                  $first: { $ifNull: ['$product.images', []] },
+                },
+              },
+              in: {
+                $ifNull: [
+                  '$$variantImage',
+                  {
+                    $ifNull: ['$$primaryImage', '$$firstImageFromArray'],
+                  },
+                ],
+              },
             },
           },
         },
       },
-
-      ...titleMatchStage,
-    ];
-
-    const ordersPipeline: PipelineStage[] = [
-      ...basePipeline,
-      { $sort: { createdAt: -1 } },
-      { $skip: skip },
-      { $limit: limit },
       {
         $project: {
           _id: 1,
@@ -124,28 +103,41 @@ export class OrderService {
           paymentStatus: 1,
           paymentMethod: 1,
           pricing: 1,
-          shippingAddress: 1,
           createdAt: 1,
-          itemCount: 1,
-          firstItemImage: 1,
-          firstProductTitle: 1,
-          user: 1,
+          shippingAddress: 1,
+          firstItemImage: '$firstImage',
+          firstProductTitle: '$product.title',
+          itemCount: '$itemCount',
+          user: {
+            _id: '$user._id',
+            email: '$user.email',
+            phone: '$user.phone',
+          },
         },
       },
     ];
+    if (search && !mongoose.Types.ObjectId.isValid(search)) {
+      basePipeline.push({
+        $match: { firstProductTitle: { $regex: search, $options: 'i' } },
+      });
+    }
 
+    const orderPipeline: PipelineStage[] = [
+      ...basePipeline,
+      { $sort: { createdAt: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+    ];
     const countPipeline: PipelineStage[] = [
       ...basePipeline,
       { $count: 'total' },
     ];
-
     const [orders, totalResult] = await Promise.all([
-      orderModel.aggregate(ordersPipeline),
+      orderModel.aggregate(orderPipeline),
       orderModel.aggregate(countPipeline),
     ]);
 
     const total = totalResult[0]?.total || 0;
-
     return {
       orders,
       pagination: {
@@ -157,164 +149,243 @@ export class OrderService {
     };
   }
   async getOrderDetails(orderId: string) {
-    if (!mongoose.Types.ObjectId.isValid(orderId)) {
-      throw new Error('Invalid order ID');
-    }
+    //   if (!mongoose.Types.ObjectId.isValid(orderId)) {
+    //     throw new Error('Invalid order ID');
+    //   }
 
-    const pipeline: PipelineStage[] = [
-      { $match: { _id: new mongoose.Types.ObjectId(orderId) } },
+    //   const pipeline: PipelineStage[] = [
+    //     { $match: { _id: new mongoose.Types.ObjectId(orderId) } },
 
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'userId',
-          foreignField: '_id',
-          as: 'user',
-        },
-      },
-      { $set: { user: { $first: '$user' } } },
-      {
-        $lookup: {
-          from: 'payments',
-          let: { orderId: '$_id' },
-          pipeline: [
-            { $match: { $expr: { $eq: ['$orderId', '$$orderId'] } } },
-            { $sort: { createdAt: -1 } },
-            { $limit: 1 },
-            {
-              $project: {
-                method: 1,
-                status: 1,
-                amount: 1,
-                currency: 1,
-                createdAt: 1,
-                updatedAt: 1,
-              },
-            },
-          ],
-          as: 'latestPayment',
-        },
-      },
+    //     // Join user
+    //     {
+    //       $lookup: {
+    //         from: 'users',
+    //         localField: 'userId',
+    //         foreignField: '_id',
+    //         as: 'user',
+    //       },
+    //     },
+    //     { $set: { user: { $first: '$user' } } },
 
-      {
-        $project: {
-          user: {
-            _id: '$user._id',
-            firstName: '$user.firstName',
-            lastName: '$user.lastName',
-            email: '$user.email',
-            phone: '$user.phone',
-            avatar: '$user.avatar',
-          },
-          items: 1,
-          pricing: 1,
-          paymentMethod: 1,
-          paymentStatus: 1,
-          status: 1,
-          shippingAddress: 1,
-          createdAt: 1,
-          updatedAt: 1,
-          latestPayment: { $first: '$latestPayment' },
-        },
-      },
-    ];
+    //     // Join latest payment
+    //     {
+    //       $lookup: {
+    //         from: 'payments',
+    //         let: { orderId: '$_id' },
+    //         pipeline: [
+    //           { $match: { $expr: { $eq: ['$orderId', '$$orderId'] } } },
+    //           { $sort: { createdAt: -1 } },
+    //           { $limit: 1 },
+    //           {
+    //             $project: {
+    //               method: 1,
+    //               status: 1,
+    //               amount: 1,
+    //               currency: 1,
+    //               createdAt: 1,
+    //               updatedAt: 1,
+    //             },
+    //           },
+    //         ],
+    //         as: 'latestPayment',
+    //       },
+    //     },
 
-    const result = await orderModel.aggregate(pipeline);
+    //     { $unwind: { path: '$items', preserveNullAndEmptyArrays: true } },
 
-    if (!result.length) {
-      throw new Error('Order not found');
-    }
+    //     {
+    //       $lookup: {
+    //         from: 'products',
+    //         let: { productId: '$items.productId', variantId: '$items.variantId' },
+    //         pipeline: [
+    //           { $match: { $expr: { $eq: ['$_id', '$$productId'] } } },
+    //           {
+    //             $project: {
+    //               title: 1,
+    //               slug: 1,
+    //               tags: 1,
+    //               variants: 1,
+    //               images: 1,
+    //               categories: 1,
+    //             },
+    //           },
+    //         ],
+    //         as: 'items.productData',
+    //       },
+    //     },
+    //     {
+    //       $set: {
+    //         'items.productData': { $first: '$items.productData' },
+    //       },
+    //     },
 
-    const order = result[0];
+    //     // Resolve variant from productData.variants
+    //     {
+    //       $set: {
+    //         'items.variant': {
+    //           $let: {
+    //             vars: {
+    //               matched: {
+    //                 $filter: {
+    //                   input: { $ifNull: ['$items.productData.variants', []] },
+    //                   as: 'v',
+    //                   cond: {
+    //                     $eq: [
+    //                       { $toString: '$$v._id' },
+    //                       { $toString: '$items.variantId' },
+    //                     ],
+    //                   },
+    //                 },
+    //               },
+    //             },
+    //             in: { $first: '$$matched' },
+    //           },
+    //         },
+    //       },
+    //     },
 
-    const productIds = order.items.map((item: any) => item.productId);
+    //     // Resolve image priority: variantPrimary > productPrimary > firstByPosition
+    //     {
+    //       $set: {
+    //         'items.image': {
+    //           $let: {
+    //             vars: {
+    //               images: { $ifNull: ['$items.productData.images', []] },
+    //               variantIdStr: { $toString: '$items.variantId' },
+    //             },
+    //             in: {
+    //               $let: {
+    //                 vars: {
+    //                   variantPrimary: {
+    //                     $first: {
+    //                       $filter: {
+    //                         input: '$$images',
+    //                         as: 'img',
+    //                         cond: {
+    //                           $and: [
+    //                             {
+    //                               $eq: [
+    //                                 { $toString: '$$img.variantId' },
+    //                                 '$$variantIdStr',
+    //                               ],
+    //                             },
+    //                             { $eq: ['$$img.isPrimary', true] },
+    //                           ],
+    //                         },
+    //                       },
+    //                     },
+    //                   },
+    //                   productPrimary: {
+    //                     $first: {
+    //                       $filter: {
+    //                         input: '$$images',
+    //                         as: 'img',
+    //                         cond: { $eq: ['$$img.isPrimary', true] },
+    //                       },
+    //                     },
+    //                   },
+    //                   firstByPosition: {
+    //                     $first: {
+    //                       $sortArray: {
+    //                         input: '$$images',
+    //                         sortBy: { position: 1 },
+    //                       },
+    //                     },
+    //                   },
+    //                 },
+    //                 in: {
+    //                   $ifNull: [
+    //                     '$$variantPrimary',
+    //                     { $ifNull: ['$$productPrimary', '$$firstByPosition'] },
+    //                   ],
+    //                 },
+    //               },
+    //             },
+    //           },
+    //         },
+    //       },
+    //     },
 
-    const products = await Product.find(
-      { _id: { $in: productIds } },
-      {
-        title: 1,
-        slug: 1,
-        tags: 1,
-        variants: 1,
-        images: 1,
-        categories: 1,
-      }
-    ).lean();
+    //     // Shape item fields
+    //     {
+    //       $set: {
+    //         'items.productTitle': { $ifNull: ['$items.productData.title', null] },
+    //         'items.productSlug': { $ifNull: ['$items.productData.slug', null] },
+    //         'items.tags': { $ifNull: ['$items.productData.tags', []] },
+    //         'items.variant': {
+    //           $cond: {
+    //             if: { $not: ['$items.variant'] },
+    //             then: null,
+    //             else: {
+    //               _id: '$items.variant._id',
+    //               sku: '$items.variant.sku',
+    //               color: '$items.variant.color',
+    //               metalType: '$items.variant.metalType',
+    //               stoneType: '$items.variant.stoneType',
+    //               size: '$items.variant.size',
+    //               price: '$items.variant.price',
+    //               compareAtPrice: '$items.variant.compareAtPrice',
+    //               stock: '$items.variant.stock',
+    //               isAvailable: '$items.variant.isAvailable',
+    //               weight: '$items.variant.weight',
+    //             },
+    //           },
+    //         },
+    //       },
+    //     },
 
-    const productMap = new Map(
-      products.map((product: any) => [String(product._id), product])
-    );
+    //     // Remove raw productData from item
+    //     {
+    //       $unset: 'items.productData',
+    //     },
 
-    order.items = await Promise.all(
-      order.items.map(async (item: any) => {
-        const product = productMap.get(String(item.productId));
+    //     // Regroup items back into array
+    //     {
+    //       $group: {
+    //         _id: '$_id',
+    //         user: { $first: '$user' },
+    //         items: { $push: '$items' },
+    //         pricing: { $first: '$pricing' },
+    //         paymentMethod: { $first: '$paymentMethod' },
+    //         paymentStatus: { $first: '$paymentStatus' },
+    //         status: { $first: '$status' },
+    //         shippingAddress: { $first: '$shippingAddress' },
+    //         createdAt: { $first: '$createdAt' },
+    //         updatedAt: { $first: '$updatedAt' },
+    //         latestPayment: { $first: '$latestPayment' },
+    //       },
+    //     },
 
-        if (!product) {
-          return {
-            ...item,
-            productTitle: null,
-            productSlug: null,
-            tags: [],
-            variant: null,
-            image: null,
-            categoryTree: [],
-          };
-        }
+    //     // Final shape
+    //     {
+    //       $project: {
+    //         user: {
+    //           _id: '$user._id',
+    //           firstName: '$user.firstName',
+    //           lastName: '$user.lastName',
+    //           email: '$user.email',
+    //           phone: '$user.phone',
+    //           avatar: '$user.avatar',
+    //         },
+    //         items: 1,
+    //         pricing: 1,
+    //         paymentMethod: 1,
+    //         paymentStatus: 1,
+    //         status: 1,
+    //         shippingAddress: 1,
+    //         createdAt: 1,
+    //         updatedAt: 1,
+    //         latestPayment: { $first: '$latestPayment' },
+    //       },
+    //     },
+    //   ];
 
-        const variant =
-          product.variants?.find(
-            (v: any) => String(v._id) === String(item.variantId)
-          ) || null;
+    //   const result = await orderModel.aggregate(pipeline);
 
-        const variantPrimaryImage =
-          product.images?.find(
-            (img: any) =>
-              String(img.variantId) === String(item.variantId) &&
-              img.isPrimary === true
-          ) || null;
+    //   if (!result.length) {
+    //     throw new Error('Order not found');
+    //   }
 
-        const productPrimaryImage =
-          product.images?.find((img: any) => img.isPrimary === true) || null;
-
-        const firstImageByPosition =
-          product.images
-            ?.slice()
-            .sort((a: any, b: any) => a.position - b.position)[0] || null;
-
-        const selectedImage =
-          variantPrimaryImage ||
-          productPrimaryImage ||
-          firstImageByPosition ||
-          null;
-
-        return {
-          productId: item.productId,
-          variantId: item.variantId,
-          quantity: item.quantity,
-          total: item.total,
-          productTitle: product.title,
-          productSlug: product.slug,
-          tags: product.tags || [],
-          variant: variant
-            ? {
-                _id: variant._id,
-                sku: variant.sku,
-                color: variant.color,
-                metalType: variant.metalType,
-                stoneType: variant.stoneType,
-                size: variant.size,
-                price: variant.price,
-                compareAtPrice: variant.compareAtPrice,
-                stock: variant.stock,
-                isAvailable: variant.isAvailable,
-                weight: variant.weight,
-              }
-            : null,
-          image: selectedImage,
-        };
-      })
-    );
-
-    return order;
+    return;
   }
 }
