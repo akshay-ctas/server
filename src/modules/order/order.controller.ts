@@ -8,6 +8,8 @@ import paymentModel from '../payment/payment.model.js';
 import { OrderResponseDTO } from './dto/order-response.dto.js';
 import z from 'zod';
 import { OrderService } from './order.service.js';
+import { OrderStatus } from '../../types/express.js';
+import { processRefund } from '../../utils/refend.js';
 
 export type CheckoutItem = {
   productId: string;
@@ -129,6 +131,12 @@ export class OrderController {
           paymentMethod: 'ONLINE',
           paymentStatus: 'pending',
           status: 'pending',
+          statusHistory: [
+            {
+              status: 'pending',
+              changedAt: new Date(),
+            },
+          ],
           shippingAddress,
         });
 
@@ -150,8 +158,14 @@ export class OrderController {
           pricing,
           paymentMethod: 'COD',
           paymentStatus: 'pending',
-          status: 'confirmed',
+          status: 'pending',
           shippingAddress,
+          statusHistory: [
+            {
+              status: 'pending',
+              changedAt: new Date(),
+            },
+          ],
         });
 
         return res.status(201).json({
@@ -161,6 +175,94 @@ export class OrderController {
           amount: totalAmount,
         });
       }
+    } catch (err: any) {
+      return res.status(400).json({ error: err.message });
+    }
+  }
+
+  async orderStatusUpdate(req: Request, res: Response) {
+    try {
+      const orderId = req.params.orderId as string;
+      const status = req.params.status as OrderStatus;
+      const bodyData = req.body;
+      // amount: 12999,
+      //   paymentId: '69bbc22ff8c568ec54f5f78f',
+      //   paymentStatus: 'success'
+      if (
+        bodyData &&
+        bodyData.paymentStatus === 'success' &&
+        bodyData.paymentId
+      ) {
+        const session = await mongoose.startSession();
+        session.startTransaction();
+        try {
+          const amount = bodyData.amount;
+          const paymentId = bodyData.paymentId;
+          const result = await processRefund({ paymentId, amount, session });
+
+          await session.commitTransaction();
+          session.endSession();
+
+          res.json({
+            success: true,
+            message: 'Payment refunded successfully',
+          });
+        } catch (error: any) {
+          await session.abortTransaction();
+          session.endSession();
+          return res
+            .status(500)
+            .json({ success: false, message: error.message });
+        }
+      }
+
+      if (!mongoose.Types.ObjectId.isValid(orderId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid order id',
+        });
+      }
+
+      const order = await orderModel.findById(orderId);
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          message: 'Order not found',
+        });
+      }
+
+      const STATUS_FLOW: Record<OrderStatus, OrderStatus[]> = {
+        pending: ['confirmed', 'cancelled'],
+        confirmed: ['processing', 'cancelled'],
+        processing: ['shipped', 'cancelled'],
+        shipped: ['delivered'],
+        delivered: [],
+        cancelled: [],
+      } as const;
+
+      const allowedNextStatuses =
+        STATUS_FLOW[order.status as keyof typeof STATUS_FLOW] || [];
+
+      if (!allowedNextStatuses.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot change order status from ${order.status} to ${status}`,
+        });
+      }
+
+      order.status = status;
+      order.statusHistory.push({
+        status: status,
+        changedAt: new Date(),
+      });
+
+      await order.save();
+
+      return res.status(200).json({
+        success: true,
+        message: `OrderId #${order._id} status updated to ${status}.`,
+      });
     } catch (err: any) {
       return res.status(400).json({ error: err.message });
     }

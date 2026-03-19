@@ -23,6 +23,28 @@ const orderItemSchema = new mongoose.Schema({
   },
 });
 
+const statusHistorySchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      enum: [
+        'pending',
+        'confirmed',
+        'processing',
+        'shipped',
+        'delivered',
+        'cancelled',
+      ],
+      required: true,
+    },
+    changedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
 const orderSchema = new mongoose.Schema(
   {
     userId: {
@@ -61,6 +83,11 @@ const orderSchema = new mongoose.Schema(
         'cancelled',
       ],
       default: 'pending',
+    },
+
+    statusHistory: {
+      type: [statusHistorySchema],
+      default: [{ status: 'pending', changedAt: new Date() }],
     },
 
     shippingAddress: {
