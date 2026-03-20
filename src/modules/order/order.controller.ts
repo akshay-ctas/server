@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import mongoose from 'mongoose';
+import mongoose, { Types } from 'mongoose';
 import { User } from '../users/user.model.js';
 import { Product } from '../product/product.model.js';
 import orderModel from '../order/order.model.js';
@@ -10,6 +10,12 @@ import z from 'zod';
 import { OrderService } from './order.service.js';
 import { OrderStatus } from '../../types/express.js';
 import { processRefund } from '../../utils/refend.js';
+import { createNotification } from '../notification/notification.service.js';
+import {
+  NotificationType,
+  RecipientType,
+} from '../notification/notification.model.js';
+import { getOrderStatusMessage } from '../../utils/utils.js';
 
 export type CheckoutItem = {
   productId: string;
@@ -167,6 +173,31 @@ export class OrderController {
             },
           ],
         });
+        const itemCount = order.items.reduce(
+          (acc, item) => acc + item.quantity,
+          0
+        );
+
+        await createNotification({
+          type: NotificationType.NEW_ORDER,
+          recipientType: RecipientType.ADMIN,
+          title: '📥 New Order Placed – Action Required',
+          message: `A new order #${order._id} worth ₹${totalAmount} has been placed by ${user.firstName} ${user.lastName}. It contains ${itemCount} item(s). Please review and confirm the fulfillment status.`,
+          entityId: order._id,
+          entityType: 'Order',
+          actionUrl: `/admin/orders/${order._id}`,
+        });
+
+        await createNotification({
+          type: NotificationType.NEW_ORDER,
+          recipientType: RecipientType.USER,
+          recipientId: user._id,
+          title: '🎉 Order Placed Successfully!',
+          message: `Hi ${user.firstName}, your order #${order._id} with ${itemCount} item(s) has been placed successfully. We'll notify you once it's confirmed and dispatched.`,
+          entityId: order._id,
+          entityType: 'Order',
+          actionUrl: `/orders/${order._id}`,
+        });
 
         return res.status(201).json({
           success: true,
@@ -185,9 +216,22 @@ export class OrderController {
       const orderId = req.params.orderId as string;
       const status = req.params.status as OrderStatus;
       const bodyData = req.body;
-      // amount: 12999,
-      //   paymentId: '69bbc22ff8c568ec54f5f78f',
-      //   paymentStatus: 'success'
+
+      const userId = req.user?.sub;
+      if (!userId) {
+        return res
+          .status(400)
+          .json({ success: false, message: 'user id not found' });
+      }
+
+      const user = await User.findById(userId);
+      if (!user) {
+        return res
+          .status(400)
+          .json({ success: false, message: 'user  not found' });
+      }
+
+      const fullName = `${user.firstName} ${user.lastName}`;
       if (
         bodyData &&
         bodyData.paymentStatus === 'success' &&
@@ -198,12 +242,19 @@ export class OrderController {
         try {
           const amount = bodyData.amount;
           const paymentId = bodyData.paymentId;
-          const result = await processRefund({ paymentId, amount, session });
+          await processRefund({
+            paymentId,
+            amount,
+            session,
+            fullName,
+            orderId,
+            userId,
+          });
 
           await session.commitTransaction();
           session.endSession();
 
-          res.json({
+          return res.json({
             success: true,
             message: 'Payment refunded successfully',
           });
@@ -258,6 +309,18 @@ export class OrderController {
       });
 
       await order.save();
+      const { title, message } = getOrderStatusMessage(order.status);
+
+      await createNotification({
+        type: NotificationType.ORDER_STATUS_UPDATED,
+        recipientType: RecipientType.USER,
+        recipientId: order.userId as Types.ObjectId,
+        title,
+        message: `${message} Order #${order._id}.`,
+        entityId: order._id,
+        entityType: 'Order',
+        actionUrl: `/orders/${order._id}`,
+      });
 
       return res.status(200).json({
         success: true,

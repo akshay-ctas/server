@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { isAuthenticate } from '../../middleware/isAuthenticate.js';
 import { isVerified } from '../../middleware/isVerified.js';
 import { PaymentController } from './payment.controller.js';

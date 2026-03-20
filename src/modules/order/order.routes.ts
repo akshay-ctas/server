@@ -3,6 +3,7 @@ import { OrderController } from './order.controller.js';
 import { isAuthenticate } from '../../middleware/isAuthenticate.js';
 import { isVerified } from '../../middleware/isVerified.js';
 import { OrderService } from './order.service.js';
+import { isAuthorize } from '../../middleware/isAuthorize.js';
 
 const router = Router();
 
@@ -17,9 +18,27 @@ router.post(
   orderController.createOrder
 );
 
-router.get('/admin', orderController.getAllOrders);
-router.get('/admin/:orderId', orderController.getOrderDetail);
-router.patch('/admin/:orderId/:status', orderController.orderStatusUpdate);
+router.get(
+  '/admin',
+  isAuthenticate,
+  isVerified,
+  isAuthorize,
+  orderController.getAllOrders
+);
+router.get(
+  '/admin/:orderId',
+  isAuthenticate,
+  isVerified,
+  isAuthorize,
+  orderController.getOrderDetail
+);
+router.patch(
+  '/admin/:orderId/:status',
+  isAuthenticate,
+  isVerified,
+  isAuthorize,
+  orderController.orderStatusUpdate
+);
 
 router.get('/:orderId', isAuthenticate, isVerified, orderController.getById);
 

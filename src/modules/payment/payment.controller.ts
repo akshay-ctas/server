@@ -1,11 +1,16 @@
 import { Request, Response } from 'express';
 import mongoose from 'mongoose';
 
-import { razorpayInstance } from '../../config/razorpay.config.js';
 import crypto from 'crypto';
 import Payment from '../payment/payment.model.js';
 import orderModel from '../order/order.model.js';
 import { processRefund } from '../../utils/refend.js';
+import { createNotification } from '../notification/notification.service.js';
+import {
+  NotificationType,
+  RecipientType,
+} from '../notification/notification.model.js';
+import { User } from '../users/user.model.js';
 
 export class PaymentController {
   constructor() {
@@ -21,7 +26,26 @@ export class PaymentController {
         req.body;
       const orderId = req.params.orderId;
       const paymentId = req.params.paymentId;
+      const userId = req.user?.sub as string;
+      if (!userId) {
+        await session.abortTransaction();
+        session.endSession();
+        return res
+          .status(400)
+          .json({ success: false, message: 'orderId is missing' });
+      }
 
+      const user = await User.findById(userId).session(session);
+
+      if (!user) {
+        await session.abortTransaction();
+        session.endSession();
+        return res
+          .status(404)
+          .json({ success: false, message: 'User not found' });
+      }
+
+      const fullName = `${user.firstName} ${user.lastName}`;
       if (!orderId) {
         await session.abortTransaction();
         session.endSession();
@@ -86,6 +110,52 @@ export class PaymentController {
 
       if (!order) throw new Error('Order not found');
 
+      await createNotification({
+        type: NotificationType.PAYMENT_SUCCESS,
+        recipientType: RecipientType.ADMIN,
+        title: '💰 Payment Received – Order Confirmed',
+        message: `Payment of ₹${payment.amount} for Order #${order._id} has been successfully received from ${fullName} via ${payment.provider}. Transaction ID: ${payment.razorpayPaymentId}.`,
+        entityId: payment._id,
+        entityType: 'Payment',
+        actionUrl: `/admin/payments/${payment._id}`,
+      });
+
+      // User notification
+      await createNotification({
+        type: NotificationType.PAYMENT_SUCCESS,
+        recipientType: RecipientType.USER,
+        recipientId: user._id,
+        title: '✅ Payment Successful!',
+        message: `Hi ${fullName}, we've received your payment of ₹${payment.amount} for Order #${order._id} via ${payment.provider}. Your order is now confirmed. Transaction ID: ${payment.razorpayPaymentId}.`,
+        entityId: payment._id,
+        entityType: 'Payment',
+        actionUrl: `/orders/${order._id}`,
+      });
+
+      const itemCount = order.items.reduce(
+        (acc, item) => acc + item.quantity,
+        0
+      );
+      await createNotification({
+        type: NotificationType.NEW_ORDER,
+        recipientType: RecipientType.ADMIN,
+        title: '📥 Order Confirmed – Action Required',
+        message: `A new order #${order._id} worth ₹${payment.amount} has been confirmed by ${fullName}. It contains ${itemCount} item(s). Please review and confirm the fulfillment status.`,
+        entityId: order._id,
+        entityType: 'Order',
+        actionUrl: `/admin/orders/${order._id}`,
+      });
+
+      await createNotification({
+        type: NotificationType.NEW_ORDER,
+        recipientType: RecipientType.USER,
+        recipientId: user._id,
+        title: '🎉 Order Confirmed Successfully!',
+        message: `Hi ${user.firstName}, your order #${order._id} with ${itemCount} item(s) has been confirmed successfully. We'll notify you once it's confirmed and dispatched.`,
+        entityId: order._id,
+        entityType: 'Order',
+        actionUrl: `/orders/${order._id}`,
+      });
       // Commit transaction
       await session.commitTransaction();
       session.endSession();
@@ -113,8 +183,29 @@ export class PaymentController {
     try {
       const { amount } = req.body;
       const paymentId = req.params.paymentId as string;
+      const userId = req.user?.sub;
+      if (!userId) {
+        return res
+          .status(400)
+          .json({ success: false, message: 'user id not found' });
+      }
 
-      const result = await processRefund({ paymentId, amount, session });
+      const user = await User.findById(userId);
+      if (!user) {
+        return res
+          .status(400)
+          .json({ success: false, message: 'user  not found' });
+      }
+
+      const fullName = `${user.firstName} ${user.lastName}`;
+
+      const result = await processRefund({
+        paymentId,
+        amount,
+        session,
+        fullName,
+        userId,
+      });
 
       await session.commitTransaction();
       session.endSession();

@@ -26,3 +26,38 @@ export const generateRefreshTokens = (payload: JwtPayload): string => {
 export function slugifyFn(title: string) {
   return slugifyFnImpl(title, { lower: true, strict: true });
 }
+
+export function getOrderStatusMessage(status: string) {
+  switch (status) {
+    case 'confirmed':
+      return {
+        title: '✅ Order Confirmed',
+        message: 'Your order has been confirmed.',
+      };
+    case 'processing':
+      return {
+        title: '🛠 Order Processing',
+        message: 'Your order is now being processed.',
+      };
+    case 'shipped':
+      return {
+        title: '🚚 Order Shipped',
+        message: 'Your order has been shipped.',
+      };
+    case 'delivered':
+      return {
+        title: '📦 Order Delivered',
+        message: 'Your order has been delivered.',
+      };
+    case 'cancelled':
+      return {
+        title: '❌ Order Cancelled',
+        message: 'Your order has been cancelled.',
+      };
+    default:
+      return {
+        title: '🔔 Order Status Updated',
+        message: `Your order status has been updated to ${status}.`,
+      };
+  }
+}
