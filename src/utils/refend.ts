@@ -1,14 +1,12 @@
-// services/payment.service.ts
-
 import mongoose, { Types } from 'mongoose';
 import { razorpayInstance } from '../config/razorpay.config.js';
 import Payment from '../modules/payment/payment.model.js';
 import orderModel from '../modules/order/order.model.js';
-import { createNotification } from '../modules/notification/notification.service.js';
 import {
   NotificationType,
   RecipientType,
 } from '../modules/notification/notification.model.js';
+import { createAndEmitNotification } from './notificationHelper.js';
 
 export async function processRefund({
   paymentId,
@@ -17,6 +15,7 @@ export async function processRefund({
   fullName,
   orderId,
   userId,
+  req,
 }: {
   paymentId: string;
   amount: number;
@@ -24,6 +23,7 @@ export async function processRefund({
   fullName: string;
   orderId?: string;
   userId: string;
+  req: any;
 }) {
   if (!amount || typeof amount !== 'number') {
     throw new Error('Amount must be a number');
@@ -62,7 +62,7 @@ export async function processRefund({
   payment.refundId = refund.id;
   await payment.save({ session });
 
-  await createNotification({
+  await createAndEmitNotification(req.app.get('io'), {
     type: NotificationType.REFEND_INITIATED,
     recipientType: RecipientType.ADMIN,
     title: '🔄 Refund Initiated – Review Required',
@@ -71,7 +71,7 @@ export async function processRefund({
     entityType: 'Payment',
     actionUrl: `/admin/refunds/${payment._id}`,
   });
-  await createNotification({
+  await createAndEmitNotification(req.app.get('io'), {
     type: NotificationType.REFEND_INITIATED,
     recipientType: RecipientType.USER,
     recipientId: new Types.ObjectId(userId),
@@ -89,7 +89,7 @@ export async function processRefund({
   );
 
   if (order) {
-    await createNotification({
+    await createAndEmitNotification(req.app.get('io'), {
       type: NotificationType.ORDER_STATUS_UPDATED,
       recipientType: RecipientType.USER,
       recipientId: new Types.ObjectId(userId),

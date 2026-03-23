@@ -15,9 +15,19 @@ import notificationRoutes from './modules/notification/notification.route.js';
 
 import { requestLogger } from './middleware/logger.js';
 import { handleRazorpayWebhook } from './modules/payment/webhook.controller.js';
+import { Server, Socket } from 'socket.io';
+import { RecipientType } from './modules/notification/notification.model.js';
 
 const app = express();
-const router = Router();
+const httpServer = http.createServer(app);
+
+const io = new Server(httpServer, {
+  cors: {
+    origin: 'http://localhost:3000',
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
+});
 
 app.use(helmet());
 app.use(
@@ -26,10 +36,32 @@ app.use(
     credentials: true,
   })
 );
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(requestLogger);
 app.use(cookieParser());
+
+app.set('io', io);
+
+interface JoinPayload {
+  role: RecipientType;
+  userId?: string;
+}
+
+io.on('connection', (socket: Socket) => {
+  console.log('Socket connected:', socket.id);
+
+  socket.on('join', ({ role, userId }: JoinPayload) => {
+    const room =
+      role === RecipientType.ADMIN ? 'room_admin' : `room_user_${userId}`;
+    socket.join(room);
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Disconnected:', socket.id);
+  });
+});
 
 app.use('/api/users', userRoutes);
 app.use('/api/auth', authRoutes);
@@ -38,7 +70,8 @@ app.use('/api/product', productRoutes);
 app.use('/api/order', orderRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/notifications', notificationRoutes);
-router.post(
+
+app.post(
   '/api/webhooks/razorpay',
   express.raw({ type: 'application/json' }),
   handleRazorpayWebhook
@@ -48,4 +81,4 @@ app.use('*', (req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-export default app;
+export { app, httpServer };

@@ -1,22 +1,14 @@
 import 'dotenv/config';
-
 import type { Request, Response, NextFunction } from 'express';
-import app from './app.js';
+import { app, httpServer } from './app.js';
 import logger from './config/logger.js';
 import { connectDB } from './config/database.js';
 
-const PORT = Number(process.env.PORT || 3000);
-
-connectDB().then(() => {
-  app.listen(PORT, () => {
-    logger.info(`Server running on port ${PORT}`);
-  });
-});
+const PORT = Number(process.env.PORT || 5000);
 
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   const status = err.status || 500;
-  let message = err.message || 'Internal Server Error';
-  let errors: string[] = [];
+  const message = err.message || 'Internal Server Error';
 
   try {
     const parsed = JSON.parse(message);
@@ -25,5 +17,11 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     }
   } catch {}
 
-  res.status(status).json({ message, errors });
+  res.status(status).json({ message, errors: [] });
+});
+
+connectDB().then(() => {
+  httpServer.listen(PORT, () => {
+    logger.info(`Server running on port ${PORT}`);
+  });
 });

@@ -4,11 +4,11 @@ import { Request, Response } from 'express';
 import Payment from './payment.model.js';
 import orderModel from '../order/order.model.js';
 import { User } from '../users/user.model.js';
-import { createNotification } from '../notification/notification.service.js';
 import {
   NotificationType,
   RecipientType,
 } from '../notification/notification.model.js';
+import { createAndEmitNotification } from '../../utils/notificationHelper.js';
 
 export async function handleRazorpayWebhook(req: Request, res: Response) {
   const secret = process.env.RAZORPAY_WEBHOOK_SECRET!;
@@ -78,7 +78,7 @@ export async function handleRazorpayWebhook(req: Request, res: Response) {
 
       const fullName = `${user.firstName} ${user.lastName}`;
 
-      await createNotification({
+      await createAndEmitNotification(req.app.get('io'), {
         type: NotificationType.REFEND_SUCCESS,
         recipientType: RecipientType.ADMIN,
         title: '✅ Refund Successfully Processed',
@@ -88,7 +88,7 @@ export async function handleRazorpayWebhook(req: Request, res: Response) {
         actionUrl: `/admin/payments/${payment._id}`,
       });
 
-      await createNotification({
+      await createAndEmitNotification(req.app.get('io'), {
         type: NotificationType.REFEND_SUCCESS,
         recipientType: RecipientType.USER,
         recipientId: user._id,

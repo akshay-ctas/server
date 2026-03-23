@@ -16,11 +16,19 @@ router.get(
 );
 
 router.patch(
-  '/',
+  '/mark-all-read',
   isAuthenticate,
   isVerified,
   isAuthenticate,
-  notificationController.isReadNotification
+  notificationController.markAllRead
+);
+
+router.patch(
+  '/:id/read',
+  isAuthenticate,
+  isVerified,
+  isAuthenticate,
+  notificationController.markSingleAsRead
 );
 
 export default router;

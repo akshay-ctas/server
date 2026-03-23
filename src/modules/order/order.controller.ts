@@ -10,12 +10,12 @@ import z from 'zod';
 import { OrderService } from './order.service.js';
 import { OrderStatus } from '../../types/express.js';
 import { processRefund } from '../../utils/refend.js';
-import { createNotification } from '../notification/notification.service.js';
 import {
   NotificationType,
   RecipientType,
 } from '../notification/notification.model.js';
 import { getOrderStatusMessage } from '../../utils/utils.js';
+import { createAndEmitNotification } from '../../utils/notificationHelper.js';
 
 export type CheckoutItem = {
   productId: string;
@@ -177,23 +177,24 @@ export class OrderController {
           (acc, item) => acc + item.quantity,
           0
         );
+        const io = req.app.get('io');
 
-        await createNotification({
-          type: NotificationType.NEW_ORDER,
-          recipientType: RecipientType.ADMIN,
-          title: '📥 New Order Placed – Action Required',
-          message: `A new order #${order._id} worth ₹${totalAmount} has been placed by ${user.firstName} ${user.lastName}. It contains ${itemCount} item(s). Please review and confirm the fulfillment status.`,
-          entityId: order._id,
-          entityType: 'Order',
-          actionUrl: `/admin/orders/${order._id}`,
-        });
-
-        await createNotification({
+        await createAndEmitNotification(io, {
           type: NotificationType.NEW_ORDER,
           recipientType: RecipientType.USER,
           recipientId: user._id,
           title: '🎉 Order Placed Successfully!',
           message: `Hi ${user.firstName}, your order #${order._id} with ${itemCount} item(s) has been placed successfully. We'll notify you once it's confirmed and dispatched.`,
+          entityId: order._id,
+          entityType: 'Order',
+          actionUrl: `/orders/${order._id}`,
+        });
+
+        await createAndEmitNotification(io, {
+          type: NotificationType.NEW_ORDER,
+          recipientType: RecipientType.ADMIN,
+          title: '📥 New Order Placed – Action Required',
+          message: `A new order #${order._id} worth ₹${totalAmount} has been placed by ${user.firstName} ${user.lastName}. It contains ${itemCount} item(s). Please review and confirm the fulfillment status.`,
           entityId: order._id,
           entityType: 'Order',
           actionUrl: `/orders/${order._id}`,
@@ -249,6 +250,7 @@ export class OrderController {
             fullName,
             orderId,
             userId,
+            req,
           });
 
           await session.commitTransaction();
@@ -311,7 +313,7 @@ export class OrderController {
       await order.save();
       const { title, message } = getOrderStatusMessage(order.status);
 
-      await createNotification({
+      await createAndEmitNotification(req.app.get('io'), {
         type: NotificationType.ORDER_STATUS_UPDATED,
         recipientType: RecipientType.USER,
         recipientId: order.userId as Types.ObjectId,

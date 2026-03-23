@@ -5,12 +5,12 @@ import crypto from 'crypto';
 import Payment from '../payment/payment.model.js';
 import orderModel from '../order/order.model.js';
 import { processRefund } from '../../utils/refend.js';
-import { createNotification } from '../notification/notification.service.js';
 import {
   NotificationType,
   RecipientType,
 } from '../notification/notification.model.js';
 import { User } from '../users/user.model.js';
+import { createAndEmitNotification } from '../../utils/notificationHelper.js';
 
 export class PaymentController {
   constructor() {
@@ -110,7 +110,7 @@ export class PaymentController {
 
       if (!order) throw new Error('Order not found');
 
-      await createNotification({
+      await createAndEmitNotification(req.app.get('io'), {
         type: NotificationType.PAYMENT_SUCCESS,
         recipientType: RecipientType.ADMIN,
         title: '💰 Payment Received – Order Confirmed',
@@ -120,8 +120,7 @@ export class PaymentController {
         actionUrl: `/admin/payments/${payment._id}`,
       });
 
-      // User notification
-      await createNotification({
+      await createAndEmitNotification(req.app.get('io'), {
         type: NotificationType.PAYMENT_SUCCESS,
         recipientType: RecipientType.USER,
         recipientId: user._id,
@@ -136,22 +135,23 @@ export class PaymentController {
         (acc, item) => acc + item.quantity,
         0
       );
-      await createNotification({
-        type: NotificationType.NEW_ORDER,
-        recipientType: RecipientType.ADMIN,
-        title: '📥 Order Confirmed – Action Required',
-        message: `A new order #${order._id} worth ₹${payment.amount} has been confirmed by ${fullName}. It contains ${itemCount} item(s). Please review and confirm the fulfillment status.`,
-        entityId: order._id,
-        entityType: 'Order',
-        actionUrl: `/admin/orders/${order._id}`,
-      });
-
-      await createNotification({
+      const io = req.app.get('io');
+      await createAndEmitNotification(io, {
         type: NotificationType.NEW_ORDER,
         recipientType: RecipientType.USER,
         recipientId: user._id,
-        title: '🎉 Order Confirmed Successfully!',
-        message: `Hi ${user.firstName}, your order #${order._id} with ${itemCount} item(s) has been confirmed successfully. We'll notify you once it's confirmed and dispatched.`,
+        title: '🎉 Order Placed Successfully!',
+        message: `Hi ${user.firstName}, your order #${order._id} with ${itemCount} item(s) has been placed successfully. We'll notify you once it's confirmed and dispatched.`,
+        entityId: order._id,
+        entityType: 'Order',
+        actionUrl: `/orders/${order._id}`,
+      });
+
+      await createAndEmitNotification(io, {
+        type: NotificationType.NEW_ORDER,
+        recipientType: RecipientType.ADMIN,
+        title: '📥 New Order Placed – Action Required',
+        message: `A new order #${order._id} worth ₹${payment.amount} has been placed by ${user.firstName} ${user.lastName}. It contains ${itemCount} item(s). Please review and confirm the fulfillment status.`,
         entityId: order._id,
         entityType: 'Order',
         actionUrl: `/orders/${order._id}`,
@@ -205,6 +205,7 @@ export class PaymentController {
         session,
         fullName,
         userId,
+        req,
       });
 
       await session.commitTransaction();
