@@ -12,6 +12,7 @@ import productRoutes from './modules/product/product.route.js';
 import orderRoutes from './modules/order/order.routes.js';
 import paymentRoutes from './modules/payment/payment.routes.js';
 import notificationRoutes from './modules/notification/notification.route.js';
+import dashboardRoutes from './modules/dashboard/dashboard.route.js';
 
 import { requestLogger } from './middleware/logger.js';
 import { handleRazorpayWebhook } from './modules/payment/webhook.controller.js';
@@ -23,7 +24,7 @@ const httpServer = http.createServer(app);
 
 const io = new Server(httpServer, {
   cors: {
-    origin: 'http://localhost:3000',
+    origin: ['http://localhost:3000', 'http://localhost:3001'],
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -37,10 +38,17 @@ app.use(
   })
 );
 
+app.use(cookieParser());
+app.use(requestLogger);
+
+app.post(
+  '/api/webhooks/razorpay',
+  express.raw({ type: 'application/json' }),
+  handleRazorpayWebhook
+);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(requestLogger);
-app.use(cookieParser());
 
 app.set('io', io);
 
@@ -50,16 +58,19 @@ interface JoinPayload {
 }
 
 io.on('connection', (socket: Socket) => {
-  console.log('Socket connected:', socket.id);
+  console.log('Socket connected on server:', socket.id);
 
   socket.on('join', ({ role, userId }: JoinPayload) => {
+    console.log('join event received:', { role, userId });
+
     const room =
       role === RecipientType.ADMIN ? 'room_admin' : `room_user_${userId}`;
     socket.join(room);
+    console.log(`Socket ${socket.id} joined ${room}`);
   });
 
-  socket.on('disconnect', () => {
-    console.log('Disconnected:', socket.id);
+  socket.on('disconnect', (reason) => {
+    console.log('Socket disconnected on server:', reason);
   });
 });
 
@@ -70,12 +81,7 @@ app.use('/api/product', productRoutes);
 app.use('/api/order', orderRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/notifications', notificationRoutes);
-
-app.post(
-  '/api/webhooks/razorpay',
-  express.raw({ type: 'application/json' }),
-  handleRazorpayWebhook
-);
+app.use('/api/dashboard', dashboardRoutes);
 
 app.use('*', (req, res) => {
   res.status(404).json({ error: 'Not found' });

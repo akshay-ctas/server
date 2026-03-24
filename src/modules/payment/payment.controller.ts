@@ -11,6 +11,7 @@ import {
 } from '../notification/notification.model.js';
 import { User } from '../users/user.model.js';
 import { createAndEmitNotification } from '../../utils/notificationHelper.js';
+import axios from 'axios';
 
 export class PaymentController {
   constructor() {

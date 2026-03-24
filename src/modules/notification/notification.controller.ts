@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { Notification, RecipientType } from './notification.model.js';
 import mongoose from 'mongoose';
+import { User } from '../users/user.model.js';
 
 export class NotificationController {
   async getNotification(req: Request, res: Response) {
@@ -10,9 +11,31 @@ export class NotificationController {
         isRead?: string;
       };
 
-      const filter: any = {
-        recipientType: 'ADMIN',
-      };
+      console.log(entityType, 'entityType');
+      console.log(isRead, 'isRead');
+
+      const authedUserId = (req.user as any)?.sub as string | undefined;
+      if (!authedUserId) {
+        return res
+          .status(401)
+          .json({ success: false, message: 'Unauthorized' });
+      }
+      console.log(authedUserId, 'authedUserId');
+
+      const userDoc = await User.findById(authedUserId).select('role').lean();
+      if (!userDoc) {
+        return res
+          .status(401)
+          .json({ success: false, message: 'user not found' });
+      }
+
+      const isAdmin = userDoc.role === 'admin';
+
+      const filter: any = isAdmin
+        ? { recipientType: RecipientType.ADMIN }
+        : { recipientType: RecipientType.USER, recipientId: authedUserId };
+
+      console.log('filter', filter);
 
       if (entityType) {
         filter.entityType = entityType;
@@ -29,9 +52,14 @@ export class NotificationController {
         .sort({ createdAt: -1 })
         .lean();
 
+      const unreadCount = await Notification.countDocuments({
+        ...filter,
+        isRead: false,
+      });
+
       return res.status(200).json({
         success: true,
-        unreadCount: notifications.length,
+        unreadCount,
         notifications,
       });
     } catch (error: any) {
@@ -45,8 +73,28 @@ export class NotificationController {
 
   async markAllRead(req: Request, res: Response) {
     try {
+      const authedUserId = (req.user as any)?.sub as string | undefined;
+      if (!authedUserId) {
+        return res
+          .status(401)
+          .json({ success: false, message: 'Unauthorized' });
+      }
+
+      const userDoc = await User.findById(authedUserId).select('role').lean();
+      if (!userDoc) {
+        return res
+          .status(401)
+          .json({ success: false, message: 'user not found' });
+      }
+
+      const isAdmin = userDoc.role === 'admin';
+
+      const baseFilter: any = isAdmin
+        ? { recipientType: RecipientType.ADMIN }
+        : { recipientType: RecipientType.USER, recipientId: authedUserId };
+
       const result = await Notification.updateMany(
-        { recipientType: 'ADMIN', isRead: false },
+        { ...baseFilter, isRead: false },
         { $set: { isRead: true, readAt: new Date() } }
       );
 
@@ -77,14 +125,33 @@ export class NotificationController {
         });
       }
 
+      const authedUserId = (req.user as any)?.sub as string | undefined;
+      if (!authedUserId) {
+        return res
+          .status(401)
+          .json({ success: false, message: 'Unauthorized' });
+      }
+
+      const userDoc = await User.findById(authedUserId).select('role').lean();
+      if (!userDoc) {
+        return res
+          .status(401)
+          .json({ success: false, message: 'user not found' });
+      }
+
+      const isAdmin = userDoc.role === 'admin';
+      const ownerFilter: any = isAdmin
+        ? { recipientType: RecipientType.ADMIN }
+        : { recipientType: RecipientType.USER, recipientId: authedUserId };
+
       const notification = await Notification.findOneAndUpdate(
-        { _id: id, isRead: false },
+        { _id: id, ...ownerFilter, isRead: false },
         { $set: { isRead: true, readAt: new Date() } },
         { new: true }
       );
 
       if (!notification) {
-        const exists = await Notification.exists({ _id: id });
+        const exists = await Notification.exists({ _id: id, ...ownerFilter });
         return res.status(exists ? 200 : 404).json({
           success: exists ? true : false,
           message: exists

@@ -42,5 +42,6 @@ export const createAndEmitNotification = async (
   io.to(room).emit('notification:new', {
     type,
     unreadCount,
+    notification,
   });
 };
