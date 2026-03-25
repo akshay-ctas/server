@@ -24,7 +24,7 @@ const httpServer = http.createServer(app);
 
 const io = new Server(httpServer, {
   cors: {
-    origin: ['http://localhost:3000', 'http://localhost:3001'],
+    origin: ['http://localhost:3000', 'http://localhost:3001',"https://josefa-unfatiguing-aggravatingly.ngrok-free.dev/"],
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -33,7 +33,7 @@ const io = new Server(httpServer, {
 app.use(helmet());
 app.use(
   cors({
-    origin: ['http://localhost:3000', 'http://localhost:3001'],
+    origin: ['http://localhost:3000', 'http://localhost:3001',"https://josefa-unfatiguing-aggravatingly.ngrok-free.dev/"],
     credentials: true,
   })
 );

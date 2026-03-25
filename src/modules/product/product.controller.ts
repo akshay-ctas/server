@@ -118,36 +118,112 @@ export class ProductController {
   }
 
   async getProductBySearchFilter(req: Request, res: Response) {
-    const page = Number(req.query.page) || 1;
-    const limit = Number(req.query.limit) || 8;
-    const search = req.query.search as string;
-    const skip = (page - 1) * limit;
+    try {
+      const page = Number(req.query.page) || 1;
+      const rawLimit = req.query.limit as string | undefined;
+      const search = (req.query.search as string) || '';
+      const categories = req.query.categories as string | string[] | undefined;
+      const minPrice = Number(req.query.minPrice);
+      const maxPrice = Number(req.query.maxPrice);
+      const sortBy = req.query.sortBy as string;
+      const color = req.query.color as string;
+      const stoneType = req.query.stoneType as string;
 
-    const filter: any = {};
-    if (search && search.trim()) {
-      filter.$or = [
-        { title: { $regex: search.trim(), $options: 'i' } },
-        { description: { $regex: search.trim(), $options: 'i' } },
-        { 'variants.sku': { $regex: search.trim(), $options: 'i' } },
+      const isAll = rawLimit === 'all';
+      let limit = isAll ? 0 : Number(rawLimit) || 8;
+
+      if (limit > 1000 && !isAll) limit = 8;
+
+      const skip = isAll ? 0 : (page - 1) * limit;
+
+      let categoryArray: string[] = [];
+      if (categories) {
+        categoryArray =
+          typeof categories === 'string' ? categories.split(',') : categories;
+      }
+
+      const categoryObjectIds = categoryArray
+        .filter((id) => mongoose.Types.ObjectId.isValid(id.trim()))
+        .map((id) => new mongoose.Types.ObjectId(id.trim()));
+
+      const matchStage: any = {
+        status: 'ACTIVE',
+      };
+
+      if (categoryObjectIds.length > 0) {
+        matchStage.categories = { $in: categoryObjectIds };
+      }
+
+      if (search.trim()) {
+        matchStage.$or = [
+          { title: { $regex: search.trim(), $options: 'i' } },
+          { description: { $regex: search.trim(), $options: 'i' } },
+          { 'variants.sku': { $regex: search.trim(), $options: 'i' } },
+        ];
+      }
+
+      // if (color) {
+      //   matchStage.variants.color = color;
+      // }
+
+      // if (stoneType) {
+      //   matchStage.variants.stoneType = stoneType;
+      // }
+
+      if (!isNaN(minPrice) || !isNaN(maxPrice)) {
+        matchStage.price = {};
+        if (!isNaN(minPrice)) matchStage.price.$gte = minPrice;
+        if (!isNaN(maxPrice)) matchStage.price.$lte = maxPrice;
+      }
+
+      let sortStage: any = { price: 1 };
+
+      if (sortBy === 'price_asc') {
+        sortStage = { price: 1 };
+      } else if (sortBy === 'price_desc') {
+        sortStage = { price: -1 };
+      }
+      const pipeline: any[] = [
+        { $match: matchStage },
+        { $sort: sortStage },
+        {
+          $facet: {
+            products: [
+              ...(isAll ? [] : [{ $skip: skip }, { $limit: limit }]),
+              {
+                $lookup: {
+                  from: 'categories',
+                  localField: 'categories',
+                  foreignField: '_id',
+                  as: 'categories_info',
+                },
+              },
+            ],
+            totalCount: [{ $count: 'total' }],
+          },
+        },
       ];
+
+      const result = await Product.aggregate(pipeline);
+
+      const products = result[0]?.products || [];
+      const total = result[0]?.totalCount?.[0]?.total || 0;
+
+      return res.status(200).json({
+        success: true,
+        products,
+        total,
+        page: isAll ? 1 : page,
+        totalPages: isAll ? 1 : Math.ceil(total / (limit || 1)),
+      });
+    } catch (error: any) {
+      console.error('Aggregation Error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Internal Server Error',
+        error: error.message,
+      });
     }
-
-    const [products, total] = await Promise.all([
-      Product.find(filter)
-        .populate('categories')
-        .limit(limit)
-        .skip(skip)
-        .sort({ sortOrder: 1 })
-        .lean(),
-      Product.countDocuments(filter),
-    ]);
-
-    res.json({
-      products,
-      total,
-      page,
-      totalPages: Math.ceil(total / limit),
-    });
   }
   async getProductsByCategories(req: Request, res: Response) {
     const rawCategories = req.query.categories as string;

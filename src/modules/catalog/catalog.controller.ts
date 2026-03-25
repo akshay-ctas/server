@@ -9,6 +9,7 @@ import {
   CategoryTreeNode,
 } from './catalog.model.js';
 import mongoose from 'mongoose';
+import { Namespace } from 'socket.io';
 
 export class CatalogController {
   constructor(private storage: S3Storage) {
@@ -129,6 +130,24 @@ export class CatalogController {
       success: true,
       message: 'Category fetched successfully',
       data: { ...category, children: subCategories },
+    });
+  }
+  async getCategoryBySortOrder(req: Request, res: Response) {
+    const leval = Number(req.params.leval) || 1;
+
+    const category = await CategoryModel.aggregate([
+      { $match: { level: leval } },
+      {
+        $project: {
+          name: 1,
+        },
+      },
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Category fetched successfully',
+      data: category,
     });
   }
 
