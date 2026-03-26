@@ -1,49 +1,40 @@
-/* eslint-disable prettier/prettier */
-import { NextFunction, Response, Request, Router } from 'express';
+import { Router } from 'express';
+import { upload } from './libs/multer.config.js';
 import { ProductController } from './product.controller.js';
-import { S3Storage } from '../../services/S3Storage.js';
-import fileUpload from 'express-fileupload';
-import createHttpError from 'http-errors';
-import { isAuthorize } from '../../middleware/isAuthorize.js';
+import { ProductService } from './product.service.js';
 
 const router = Router();
 
-const storage = new S3Storage();
+const productService = new ProductService();
+const productController = new ProductController(productService);
+router.post('/', upload.array('files', 10), productController.create);
+router.get('/all', productController.get);
+router.get('/', productController.getProductsByCategories);
+router.get('/search', productController.getProductBySearchFilter);
+router.get('/:slug', productController.getProductBySlug);
 
-const productController = new ProductController(storage);
-
+router.patch('/:productId', productController.editProductDetails);
+router.patch('/:productId/variants/:variantId', productController.editVariant);
 router.post(
-  '/',
-  isAuthorize,
-  fileUpload({
-    limits: { fileSize: 500 * 1024 },
-    abortOnLimit: true,
-    limitHandler: (req: Request, res: Response, next: NextFunction) => {
-      const error = createHttpError(400, 'File size exceeds the limits');
-      next(error);
-    },
-  }),
-  productController.createProduct
+  '/:productId/variants/:variantId/images',
+  upload.array('images', 10),
+  productController.addImages
 );
-router.put(
-  '/:productId',
-  isAuthorize,
-  fileUpload({
-    limits: { fileSize: 500 * 1024 },
-    abortOnLimit: true,
-    limitHandler: (req: Request, res: Response, next: NextFunction) => {
-      const error = createHttpError(400, 'File size exceeds the limits');
-      next(error);
-    },
-  }),
-  productController.updateProduct
+router.patch(
+  '/:productId/variants/:variantId/images/:imageId/set-primary',
+  productController.setPrimaryImage
 );
 
-router.get(
-  '/',
-  productController.getAllProducts);
+router.delete(
+  '/:productId/variants/:variantId/images/:imageId/delete',
+  productController.deleteImage
+);
 
-  router.get('/:productId', productController.getProductById);
-  router.delete('/:productId', productController.deleteProduct);
+router.delete(
+  '/:productId/variants/:variantId',
+  productController.deleteVariant
+);
+
+router.delete('/:productId', productController.deleteProduct);
 
 export default router;

@@ -9,20 +9,20 @@ import {
   CategoryTreeNode,
 } from './catalog.model.js';
 import mongoose from 'mongoose';
+import { Namespace } from 'socket.io';
 
 export class CatalogController {
   constructor(private storage: S3Storage) {
     this.createCategory = this.createCategory.bind(this);
     this.getCategoryById = this.getCategoryById.bind(this);
     this.getCategoriesByIds = this.getCategoriesByIds.bind(this);
-    this.getCategories = this.getCategories.bind(this);
     this.updateCategory = this.updateCategory.bind(this);
     this.deleteCategory = this.deleteCategory.bind(this);
     this.categoryTree = this.categoryTree.bind(this);
   }
 
   async categoryTree(req: Request, res: Response) {
-    const categories = await CategoryModel.find({ isActive: true })
+    const categories = await CategoryModel.find()
       .sort({ sortOrder: 1 })
       .lean<CategoryLean[]>();
 
@@ -53,7 +53,7 @@ export class CatalogController {
   async createCategory(req: Request, res: Response) {
     const { name, slug, url, parentId, sortOrder, metaTitle, metaDescription } =
       req.body;
-
+    // @ts-ignore
     const image = req.files!.imageUrl as UploadedFile;
     const imageName = `category_${uuidv4()}`;
 
@@ -133,6 +133,24 @@ export class CatalogController {
       data: { ...category, children: subCategories },
     });
   }
+  async getCategoryBySortOrder(req: Request, res: Response) {
+    const leval = Number(req.params.leval) || 1;
+
+    const category = await CategoryModel.aggregate([
+      { $match: { level: leval } },
+      {
+        $project: {
+          name: 1,
+        },
+      },
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Category fetched successfully',
+      data: category,
+    });
+  }
 
   async getCategoriesByIds(req: Request, res: Response) {
     const ids = req.query.ids as string;
@@ -164,21 +182,6 @@ export class CatalogController {
     });
   }
 
-  async getCategories(req: Request, res: Response) {
-    const category = await CategoryModel.find()
-      .populate({
-        path: 'children',
-        select: 'name slug url level imageUrl sortOrder isActive',
-      })
-      .lean();
-
-    return res.status(200).json({
-      success: true,
-      message: 'Category fetched successfully',
-      data: category,
-    });
-  }
-
   async updateCategory(req: Request, res: Response) {
     const category_id = req.params.category_id as string;
 
@@ -207,10 +210,11 @@ export class CatalogController {
 
     let imageName: string | undefined;
     let oldImage: string | undefined;
-
+    // @ts-ignore
     if (req.files?.imageUrl) {
       oldImage = oldCategory?.imageUrl;
-      const image = req.files.image as UploadedFile;
+      // @ts-ignore
+      const image = req.files?.image as any;
       imageName = `category_${uuidv4()}`;
       await this.storage.upload({
         filename: imageName,

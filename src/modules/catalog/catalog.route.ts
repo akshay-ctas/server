@@ -24,10 +24,9 @@ router.post(
   catelogController.createCategory
 );
 
+router.get('/all/:leval', catelogController.getCategoryBySortOrder);
 router.get('/', catelogController.getCategoriesByIds);
 router.get('/tree', catelogController.categoryTree);
-
-router.get('/all', catelogController.getCategories);
 router.get('/:category_id', catelogController.getCategoryById);
 router.put(
   '/:category_id',

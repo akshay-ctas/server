@@ -1,4 +1,6 @@
 import mongoose, { Document, Schema } from 'mongoose';
+import { HydratedDocument } from 'mongoose';
+import { CallbackWithoutResultAndOptionalError } from 'mongoose';
 
 export interface IAddress {
   type: 'shipping' | 'billing';
@@ -10,7 +12,8 @@ export interface IAddress {
   country: string;
   zipCode: string;
   phone: string;
-  isDefault: boolean;
+  isDefault?: boolean;
+  _id?: string;
 }
 
 export interface IUser extends Document {
@@ -37,25 +40,22 @@ export interface IUser extends Document {
   updatedAt: Date;
 }
 
-const addressSchema = new Schema<IAddress>(
-  {
-    type: {
-      type: String,
-      enum: ['shipping', 'billing'],
-      required: true,
-    },
-    fullName: { type: String, required: true },
-    addressLine1: { type: String, required: true },
-    addressLine2: String,
-    city: { type: String, required: true },
-    state: { type: String, required: true },
-    country: { type: String, required: true, default: 'USA' },
-    zipCode: { type: String, required: true },
-    phone: { type: String, required: true },
-    isDefault: { type: Boolean, default: false },
+const addressSchema = new Schema<IAddress>({
+  type: {
+    type: String,
+    enum: ['shipping', 'billing'],
+    required: true,
   },
-  { _id: false }
-);
+  fullName: { type: String, required: true },
+  addressLine1: { type: String, required: true },
+  addressLine2: String,
+  city: { type: String, required: true },
+  state: { type: String, required: true },
+  country: { type: String, required: true, default: 'USA' },
+  zipCode: { type: String, required: true },
+  phone: { type: String, required: true },
+  isDefault: { type: Boolean, default: false },
+});
 
 const userSchema = new Schema<IUser>(
   {
@@ -69,10 +69,11 @@ const userSchema = new Schema<IUser>(
       trim: true,
       match: /^\S+@\S+\.\S+$/,
     },
+
     password: {
       type: String,
       required: true,
-      select: true,
+      select: false,
     },
     phone: String,
     avatar: String,
@@ -97,6 +98,15 @@ const userSchema = new Schema<IUser>(
   }
 );
 
+type UserDocument = HydratedDocument<IUser>;
+
+userSchema.pre('save', async function (this: UserDocument) {
+  const defaultAddresses = this.addresses.filter((a) => a.isDefault);
+
+  if (defaultAddresses.length > 1) {
+    throw new Error('Only one default address allowed');
+  }
+});
 const User = mongoose.model<IUser>('User', userSchema);
 
 export { User };

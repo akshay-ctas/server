@@ -16,6 +16,7 @@ export function isAuthorize(req: Request, res: Response, next: NextFunction) {
     token as string,
     process.env.ACCESS_TOKEN_SECRET!
   ) as JwtPayload;
+
   if (decoded.role !== 'admin') {
     throw createHttpError(403, 'Forbidden: Admins only');
   }

@@ -1,244 +1,697 @@
 import { Request, Response } from 'express';
-import createHttpError from 'http-errors';
-import { slugifyFn } from '../../utils/utils.js';
+import { ProductService } from './product.service.js';
+import {
+  CreateProductSchema,
+  productQuerySchema,
+} from './product.validation.js';
 import { Product } from './product.model.js';
-import { S3Storage } from '../../services/S3Storage.js';
-import { v4 as uuidv4 } from 'uuid';
-import { UploadedFile } from 'express-fileupload';
+import { s3Service } from './libs/s3.service.js';
 import mongoose from 'mongoose';
+import createHttpError from 'http-errors';
 
 export class ProductController {
-  constructor(private storage: S3Storage) {
-    this.createProduct = this.createProduct.bind(this);
-    this.updateProduct = this.updateProduct.bind(this);
-    this.getAllProducts = this.getAllProducts.bind(this);
+  constructor(private productService: ProductService) {
+    this.create = this.create.bind(this);
+    this.get = this.get.bind(this);
+    this.editProductDetails = this.editProductDetails.bind(this);
+    this.editVariant = this.editVariant.bind(this);
+    this.addImages = this.addImages.bind(this);
   }
+  async create(req: Request, res: Response) {
+    try {
+      const rawBody = this.parseBody(req.body);
 
-  async createProduct(req: Request, res: Response) {
-    const {
-      title,
-      description,
-      price,
-      compareAtPrice,
-      status,
-      tags,
-      sortOrder,
-      categories,
-      metaTitle,
-      metaDescription,
-      publishedAt,
-    } = req.body;
-
-    if (!title || !price || !categories || categories.length === 0) {
-      throw createHttpError(400, 'title, price and category are required');
-    }
-
-    let slug = slugifyFn(title);
-
-    const imagename = `Product_${uuidv4()}`;
-    const image = req?.files!.image as UploadedFile;
-
-    await this.storage.upload({
-      fileData: image.data,
-      filename: imagename,
-    });
-
-    const existingSlug = await Product.findOne({ slug });
-    if (existingSlug) {
-      slug = `${slug}-${Date.now()}`;
-    }
-
-    const product = new Product({
-      title,
-      slug,
-      description,
-      price,
-      compareAtPrice: compareAtPrice || 0,
-      status: status || 'DRAFT',
-      tags: tags || [],
-      sortOrder: sortOrder || 0,
-      categories,
-      metaTitle,
-      metaDescription,
-      image: imagename,
-      publishedAt: status === 'ACTIVE' ? publishedAt || new Date() : undefined,
-    });
-
-    await product.save();
-
-    return res.status(201).json({
-      success: true,
-      message: 'Product successfully create ho gaya',
-      data: product,
-    });
-  }
-
-  async updateProduct(req: Request, res: Response) {
-    const productId = req.params.productId as string;
-
-    if (!productId) {
-      throw createHttpError(400, 'productId is not found');
-    }
-    if (!mongoose.Types.ObjectId.isValid(productId)) {
-      throw createHttpError(400, 'Invalid category id');
-    }
-    const {
-      title,
-      description,
-      price,
-      compareAtPrice,
-      status,
-      tags,
-      sortOrder,
-      categories,
-      metaTitle,
-      metaDescription,
-      publishedAt,
-    } = req.body;
-
-    if (!title || !price || !categories || categories.length === 0) {
-      throw createHttpError(400, 'title, price and category are required');
-    }
-
-    let slug = slugifyFn(title);
-
-    let imageName: string | undefined;
-    let oldImage: string | undefined;
-
-    const oldProducts = await Product.findById(productId);
-    if (!oldProducts) {
-      throw createHttpError(400, 'Product is not found');
-    }
-
-    if (req.files?.imageUrl) {
-      oldImage = oldProducts?.image;
-      const image = req.files.image as UploadedFile;
-      imageName = `category_${uuidv4()}`;
-      await this.storage.upload({
-        filename: imageName,
-        fileData: image?.data,
-      });
-      if (oldImage) {
-        await this.storage.delete(oldImage);
+      const validation = CreateProductSchema.safeParse(rawBody);
+      if (!validation.success) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: validation.error.flatten(),
+        });
       }
+
+      const imageFiles = Array.isArray(req.files) ? req.files : [];
+      const imagesMeta = req.body.images ? JSON.parse(req.body.images) : [];
+
+      const product = await this.productService.create(
+        { ...validation.data, imagesMeta },
+        imageFiles
+      );
+
+      return res.status(201).json({
+        success: true,
+        message: 'Product created successfully',
+        data: product,
+      });
+    } catch (error: unknown) {
+      console.error('ProductController.create error:', error);
+
+      if (error instanceof Error) {
+        return res.status(500).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error',
+      });
     }
-    const existingSlug = await Product.findOne({ slug });
-    if (existingSlug) {
-      slug = `${slug}-${Date.now()}`;
-    }
-
-    const updatedProduct = await Product.findByIdAndUpdate(
-      productId,
-      {
-        title,
-        slug,
-        description,
-        price,
-        compareAtPrice: compareAtPrice || 0,
-        status: status || 'DRAFT',
-        tags: tags || [],
-        sortOrder: sortOrder || 0,
-        categories,
-        metaTitle,
-        metaDescription,
-        image: imageName,
-        publishedAt:
-          status === 'ACTIVE' ? publishedAt || new Date() : undefined,
-      },
-      { new: true, runValidators: true }
-    );
-
-    await updatedProduct?.save();
-
-    return res.status(201).json({
-      success: true,
-      message: 'Product successfully create ho gaya',
-      data: updatedProduct,
-    });
   }
 
-  async getAllProducts(req: Request, res: Response) {
-    const { page = 1, limit = 10, search, category, status } = req.query;
+  async get(req: Request, res: Response) {
+    try {
+      const validatedQuery = productQuerySchema.parse(req.query);
+      const result = await this.productService.getAllProducts(validatedQuery);
+      res.status(200).json(result);
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        return res.status(500).json({
+          success: false,
+          message: error.message,
+        });
+      }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const filter: any = {};
-
-    if (search) {
-      filter.title = { $regex: search, $options: 'i' };
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid query parameters',
+      });
     }
-    if (category) {
-      filter.categories = {
-        $in: [new mongoose.Types.ObjectId(category as string)],
+  }
+
+  async getProductBySlug(req: Request, res: Response) {
+    try {
+      const slug = req.params.slug as string;
+
+      if (!slug) {
+        throw createHttpError(400, 'Slug is required');
+      }
+
+      const product = await Product.findOne({ slug, status: 'ACTIVE' })
+        .populate('categories', 'name slug parentId')
+        .lean();
+
+      if (!product) {
+        throw createHttpError(404, 'Product not found');
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: product,
+      });
+    } catch (error: any) {
+      console.error('getProductBySlug error:', error);
+
+      if (error instanceof createHttpError.HttpError) {
+        return res.status(error.statusCode).json({
+          success: false,
+          message: error.message,
+        });
+      }
+
+      return res.status(500).json({
+        success: false,
+        message: 'Internal server error',
+      });
+    }
+  }
+
+  async getProductBySearchFilter(req: Request, res: Response) {
+    try {
+      const page = Number(req.query.page) || 1;
+      const rawLimit = req.query.limit as string | undefined;
+      const search = (req.query.search as string) || '';
+      const categories = req.query.categories as string | string[] | undefined;
+      const minPrice = Number(req.query.minPrice);
+      const maxPrice = Number(req.query.maxPrice);
+      const sortBy = req.query.sortBy as string;
+      const color = req.query.color as string;
+      const stoneType = req.query.stoneType as string;
+
+      const isAll = rawLimit === 'all';
+      let limit = isAll ? 0 : Number(rawLimit) || 8;
+
+      if (limit > 1000 && !isAll) limit = 8;
+
+      const skip = isAll ? 0 : (page - 1) * limit;
+
+      let categoryArray: string[] = [];
+      if (categories) {
+        categoryArray =
+          typeof categories === 'string' ? categories.split(',') : categories;
+      }
+
+      const categoryObjectIds = categoryArray
+        .filter((id) => mongoose.Types.ObjectId.isValid(id.trim()))
+        .map((id) => new mongoose.Types.ObjectId(id.trim()));
+
+      const matchStage: any = {
+        status: 'ACTIVE',
       };
-    } else {
-      return res
-        .status(400)
-        .json({ success: false, message: 'Invalid Category ID format' });
+
+      if (categoryObjectIds.length > 0) {
+        matchStage.categories = { $in: categoryObjectIds };
+      }
+
+      if (search.trim()) {
+        matchStage.$or = [
+          { title: { $regex: search.trim(), $options: 'i' } },
+          { description: { $regex: search.trim(), $options: 'i' } },
+          { 'variants.sku': { $regex: search.trim(), $options: 'i' } },
+        ];
+      }
+
+      // if (color) {
+      //   matchStage.variants.color = color;
+      // }
+
+      // if (stoneType) {
+      //   matchStage.variants.stoneType = stoneType;
+      // }
+
+      if (!isNaN(minPrice) || !isNaN(maxPrice)) {
+        matchStage.price = {};
+        if (!isNaN(minPrice)) matchStage.price.$gte = minPrice;
+        if (!isNaN(maxPrice)) matchStage.price.$lte = maxPrice;
+      }
+
+      let sortStage: any = { price: 1 };
+
+      if (sortBy === 'price_asc') {
+        sortStage = { price: 1 };
+      } else if (sortBy === 'price_desc') {
+        sortStage = { price: -1 };
+      }
+      const pipeline: any[] = [
+        { $match: matchStage },
+        { $sort: sortStage },
+        {
+          $facet: {
+            products: [
+              ...(isAll ? [] : [{ $skip: skip }, { $limit: limit }]),
+              {
+                $lookup: {
+                  from: 'categories',
+                  localField: 'categories',
+                  foreignField: '_id',
+                  as: 'categories_info',
+                },
+              },
+            ],
+            totalCount: [{ $count: 'total' }],
+          },
+        },
+      ];
+
+      const result = await Product.aggregate(pipeline);
+
+      const products = result[0]?.products || [];
+      const total = result[0]?.totalCount?.[0]?.total || 0;
+
+      return res.status(200).json({
+        success: true,
+        products,
+        total,
+        page: isAll ? 1 : page,
+        totalPages: isAll ? 1 : Math.ceil(total / (limit || 1)),
+      });
+    } catch (error: any) {
+      console.error('Aggregation Error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Internal Server Error',
+        error: error.message,
+      });
     }
-    if (status) {
-      filter.status = status;
-    }
+  }
+  async getProductsByCategories(req: Request, res: Response) {
+    const rawCategories = req.query.categories as string;
 
-    const skip = (Number(page) - 1) * Number(limit);
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 8;
 
-    const products = await Product.find(filter)
-      .populate('categories', 'name slug')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(Number(limit));
+    const skip = (page - 1) * limit;
 
-    const totalProducts = await Product.countDocuments(filter);
+    const categoryIds = Array.isArray(rawCategories)
+      ? rawCategories
+      : rawCategories
+        ? [rawCategories]
+        : [];
 
-    return res.status(200).json({
-      success: true,
-      data: products,
-      pagination: {
-        total: totalProducts,
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(totalProducts / Number(limit)),
-      },
+    const filter = { categories: { $in: categoryIds }, status: 'ACTIVE' };
+
+    const [products, total] = await Promise.all([
+      Product.find(filter)
+        .populate('categories')
+        .limit(limit)
+        .skip(skip)
+        .sort({ sortOrder: 1 }),
+      Product.countDocuments(filter),
+    ]);
+
+    res.json({
+      products,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
     });
   }
-  async getProductById(req: Request, res: Response) {
-    const productId = req.params.productId as string;
-    console.log(productId);
+  async editProductDetails(req: Request, res: Response) {
+    try {
+      const productId = req.params.productId;
 
-    if (!productId) {
-      throw createHttpError(400, 'productId is not found');
-    }
-    if (!mongoose.Types.ObjectId.isValid(productId)) {
-      throw createHttpError(400, 'Invalid category id');
-    }
+      if (!productId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Product ID is required',
+        });
+      }
 
-    const product = await Product.findById(productId);
-    return res.status(200).json({
-      success: true,
-      data: product,
-    });
+      const updateData = this.buildUpdateData(req.body);
+
+      const updatedProduct = await Product.findByIdAndUpdate(
+        productId,
+        { $set: updateData },
+        { new: true, runValidators: true }
+      );
+
+      if (!updatedProduct) {
+        return res.status(404).json({
+          success: false,
+          message: 'Product not found',
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Product updated successfully',
+        data: updatedProduct,
+      });
+    } catch (error: any) {
+      console.error('editProductDetails error:', error);
+
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Internal server error',
+      });
+    }
   }
+  async setPrimaryImage(req: Request, res: Response) {
+    try {
+      const { productId, variantId, imageId } = req.params;
 
+      if (!productId || !variantId || !imageId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Product ID, Variant ID, and Image ID are required',
+        });
+      }
+
+      const product = await Product.findById(productId);
+
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          message: 'Product not found',
+        });
+      }
+
+      product.images = product.images.map((img: any) => {
+        if (img.variantId.toString() === variantId) {
+          return {
+            ...img.toObject(),
+            isPrimary: img._id.toString() === imageId,
+          };
+        }
+        return img;
+      });
+
+      await product.save();
+
+      return res.status(200).json({
+        success: true,
+        message: `${imageId} set as new Primary Image`,
+      });
+    } catch (error: any) {
+      console.error('setPrimaryImage error:', error);
+
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Internal server error',
+      });
+    }
+  }
+  async deleteVariant(req: Request, res: Response) {
+    try {
+      const { productId, variantId } = req.params;
+
+      if (!productId || !variantId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Product ID and Variant ID are required',
+        });
+      }
+
+      const product = await Product.findById(productId);
+      if (!product) {
+        return res
+          .status(404)
+          .json({ success: false, message: 'Product not found' });
+      }
+
+      const variantImages = product.images.filter(
+        (img) => img.variantId?.toString() === variantId
+      );
+      const variantImageUrls = variantImages.map((img) => img.url);
+      if (variantImageUrls.length > 0) {
+        await s3Service.deleteMany(variantImageUrls);
+      }
+
+      product.variants = product.variants.filter(
+        (v) => v._id.toString() !== variantId
+      );
+      product.images = product.images.filter(
+        (img) => img.variantId?.toString() !== variantId
+      );
+
+      await product.save();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Variant and associated images deleted successfully',
+      });
+    } catch (error: any) {
+      console.error('deleteVariant error:', error);
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Internal server error',
+      });
+    }
+  }
+  async deleteImage(req: Request, res: Response) {
+    try {
+      const { productId, variantId, imageId } = req.params;
+
+      if (!productId || !variantId || !imageId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Product ID, Variant ID, and Image ID are required',
+        });
+      }
+
+      const product = await Product.findById(productId);
+      if (!product) {
+        return res
+          .status(404)
+          .json({ success: false, message: 'Product not found' });
+      }
+
+      const imageToDelete = product.images.find(
+        (img) =>
+          img.variantId?.toString() === variantId &&
+          img._id?.toString() === imageId
+      );
+      if (!imageToDelete) {
+        return res
+          .status(404)
+          .json({ success: false, message: 'Image not found' });
+      }
+
+      await s3Service.delete(imageToDelete.url);
+
+      const updatedVariantImages = product.images
+        .filter(
+          (img) =>
+            img.variantId?.toString() === variantId &&
+            img._id?.toString() !== imageId
+        )
+        .sort((a, b) => a.position - b.position);
+
+      if (
+        updatedVariantImages.length > 0 &&
+        !updatedVariantImages.some((img) => img.isPrimary)
+      ) {
+        updatedVariantImages[0].isPrimary = true;
+      }
+
+      // Reset positions
+      updatedVariantImages.forEach((img, index) => {
+        img.position = index + 1;
+      });
+
+      product.images = [...updatedVariantImages];
+
+      await product.save();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Image deleted successfully, positions updated',
+      });
+    } catch (error: any) {
+      console.error('deleteImage error:', error);
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Internal server error',
+      });
+    }
+  }
   async deleteProduct(req: Request, res: Response) {
-    const productId = req.params.productId as string;
-    console.log(productId);
+    try {
+      const { productId } = req.params;
 
-    if (!productId) {
-      throw createHttpError(400, 'productId is not found');
-    }
-    if (!mongoose.Types.ObjectId.isValid(productId)) {
-      throw createHttpError(400, 'Invalid category id');
-    }
+      if (!productId) {
+        res.status(400).json({
+          success: false,
+          message: 'Product ID is required',
+        });
+      }
 
-    const product = await Product.findById(productId);
-    if (!product) {
-      throw createHttpError(400, 'Product not found');
-    }
-    await Product.findByIdAndDelete(productId);
-    if (product?.image) await this.storage.delete(product.image);
+      const product = await Product.findById(productId);
 
-    return res.status(200).json({
-      success: true,
-      message: `${product?._id} product deleted`,
-    });
+      if (!product) {
+        return res.status(400).json({
+          success: false,
+          message: 'Product not found',
+        });
+      }
+
+      const imageUrls = product.images?.map((img) => img.url) || [];
+
+      if (imageUrls.length > 0) {
+        await s3Service.deleteMany(imageUrls);
+      }
+
+      await Product.findByIdAndDelete(productId);
+
+      return res.status(200).json({
+        success: true,
+        message: 'Product deleted successfully',
+      });
+    } catch (error: any) {
+      console.error('deleteProduct error:', error);
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Internal server error',
+      });
+    }
+  }
+  async addImages(req: Request, res: Response) {
+    try {
+      const { productId, variantId } = req.params;
+
+      if (!productId || !variantId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Product ID and Variant ID are required',
+        });
+      }
+
+      const imageFiles = Array.isArray(req.files) ? req.files : [];
+
+      if (!imageFiles.length) {
+        return res.status(400).json({
+          success: false,
+          message: 'No files uploaded',
+        });
+      }
+
+      const product = await Product.findById(productId);
+
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          message: 'Product not found',
+        });
+      }
+
+      const uploadedUrls =
+        imageFiles.length > 0
+          ? await s3Service.uploadMany(imageFiles, 'products')
+          : [];
+
+      const existingVariantImages =
+        product.images?.filter(
+          (img: any) => img.variantId.toString() === variantId
+        ) || [];
+
+      const maxPosition =
+        existingVariantImages.length > 0
+          ? Math.max(...existingVariantImages.map((i: any) => i.position))
+          : -1;
+
+      const newImages = uploadedUrls.map((url: string, index: number) => ({
+        variantId: new mongoose.Types.ObjectId(variantId as string),
+        url,
+        position: maxPosition + 1 + index,
+        isPrimary: existingVariantImages.length === 0 && index === 0,
+        altText: '',
+      }));
+
+      product.images.push(...newImages);
+
+      await product.save();
+
+      return res.status(200).json({
+        success: true,
+        message: 'Images received successfully',
+        count: imageFiles.length,
+      });
+    } catch (error: any) {
+      console.error('editProductVariants error:', error);
+
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Internal server error',
+      });
+    }
+  }
+
+  async editVariant(req: Request, res: Response) {
+    try {
+      const productId = req.params.productId;
+      const variantId = req.params.variantId;
+
+      if (!productId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Product ID is required',
+        });
+      }
+      if (!variantId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Variant ID is required',
+        });
+      }
+
+      const bodyData = this.buildVeriantData(req.body);
+
+      const setData: any = {};
+      Object.keys(bodyData).forEach((key) => {
+        setData[`variants.$.${key}`] = bodyData[key];
+      });
+
+      const updatedVariant = await Product.updateOne(
+        { _id: productId, 'variants._id': variantId },
+        { $set: setData }
+      );
+
+      if (updatedVariant.matchedCount === 0) {
+        return res.status(404).json({
+          success: false,
+          message: 'Variant not found',
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: 'Product Variants updated successfully',
+        data: updatedVariant,
+      });
+    } catch (error: any) {
+      console.error('editProductVariants error:', error);
+
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Internal server error',
+      });
+    }
+  }
+
+  private buildVeriantData(body: Request['body']) {
+    const { color, metalType, price, size, stock, stoneType, sku } = body;
+
+    const updateVariant: any = {};
+
+    if (color !== undefined) updateVariant.color = color;
+    if (metalType !== undefined) updateVariant.metalType = metalType;
+    if (price !== undefined) updateVariant.price = price;
+    if (size !== undefined) updateVariant.size = size;
+    if (stock !== undefined) updateVariant.stock = stock;
+    if (stoneType !== undefined) updateVariant.stoneType = stoneType;
+    if (sku !== undefined) updateVariant.sku = sku;
+
+    return updateVariant;
+  }
+  private buildUpdateData(body: Request['body']) {
+    const {
+      status,
+      title,
+      metaTitle,
+      metaDescription,
+      description,
+      price,
+      compareAtPrice,
+      sortOrder,
+      tags,
+      categories,
+    } = body;
+
+    const updateData: any = {};
+
+    if (status !== undefined) updateData.status = status;
+    if (title !== undefined) updateData.title = title;
+    if (metaTitle !== undefined) updateData.metaTitle = metaTitle;
+    if (metaDescription !== undefined)
+      updateData.metaDescription = metaDescription;
+    if (description !== undefined) updateData.description = description;
+    if (price !== undefined) updateData.price = Number(price);
+    if (compareAtPrice !== undefined)
+      updateData.compareAtPrice = Number(compareAtPrice);
+    if (sortOrder !== undefined) updateData.sortOrder = Number(sortOrder);
+
+    if (tags !== undefined) updateData.tags = this.parseArrayField(tags);
+
+    if (categories !== undefined)
+      updateData.categories = this.parseArrayField(categories);
+
+    return updateData;
+  }
+
+  private parseBody(body: Request['body']) {
+    return {
+      ...body,
+      price: Number(body.price),
+      compareAtPrice: body.compareAtPrice
+        ? Number(body.compareAtPrice)
+        : undefined,
+      sortOrder: body.sortOrder ? Number(body.sortOrder) : 0,
+      categories: this.parseArrayField(body.categories),
+      tags: this.parseArrayField(body.tags),
+      variants: body.variants ? JSON.parse(body.variants) : [],
+      images: undefined,
+    };
+  }
+
+  private parseArrayField(value: unknown): string[] {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    try {
+      const parsed = JSON.parse(value as string);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+      return [value as string];
+    }
   }
 }

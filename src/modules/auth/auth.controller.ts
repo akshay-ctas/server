@@ -3,9 +3,6 @@ import { AuthService } from './auth.service.js';
 import { loginSchema, registerSchema } from './validation.js';
 import createHttpError from 'http-errors';
 import bcrypt from 'bcrypt';
-import { S3Storage } from '../../services/S3Storage.js';
-import { UploadedFile } from 'express-fileupload';
-import { v4 as uuidv4 } from 'uuid';
 
 import {
   generateAccessTokens,
@@ -14,6 +11,7 @@ import {
 import jwt from 'jsonwebtoken';
 import { generateOTP, sendOTPEmail } from '../../utils/transporter.js';
 import { OTPModel } from '../users/otp.model.js';
+import { JwtPayload } from '../../types/types.js';
 
 export const registerUser = async (req: Request, res: Response) => {
   const result = registerSchema.safeParse(req.body);
@@ -29,14 +27,7 @@ export const registerUser = async (req: Request, res: Response) => {
       })
     );
   }
-  const image = req.files!.avatar as UploadedFile;
-  const imageName = uuidv4();
 
-  const s3Storage = new S3Storage();
-  await s3Storage.upload({
-    filename: imageName,
-    fileData: image.data,
-  });
   const isEmailExist = await AuthService.findByEmail(result?.data?.email);
   if (isEmailExist) {
     throw createHttpError(400, 'Email already exists!');
@@ -49,7 +40,6 @@ export const registerUser = async (req: Request, res: Response) => {
 
   const registeredUser = await AuthService.register({
     ...user,
-    avatar: imageName,
   });
 
   const safeUser = {
@@ -58,7 +48,6 @@ export const registerUser = async (req: Request, res: Response) => {
     lastName: registeredUser.lastName,
     email: registeredUser.email,
     phone: registeredUser.phone,
-    avatar: imageName,
     gender: registeredUser.gender,
     role: registeredUser.role,
     isEmailVerified: registeredUser.isEmailVerified,
@@ -107,13 +96,18 @@ export const loginUser = async (req: Request, res: Response) => {
   const accessToken = generateAccessTokens(payload);
   const refreshToken = generateRefreshTokens(payload);
 
-  await user.updateOne({ lastLogin: new Date() });
-
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+
+  res.cookie('accessToken', accessToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    maxAge: 15 * 60 * 1000,
   });
 
   res.status(200).json({
@@ -155,12 +149,20 @@ export async function refresh(req: Request, res: Response) {
     throw createHttpError(401, 'refresh token is missing');
   }
 
-  const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET!);
+  const decoded = jwt.verify(
+    refreshToken,
+    process.env.REFRESH_TOKEN_SECRET!
+  ) as JwtPayload;
 
-  const payload = { sub: decoded.sub as string };
+  const payload = { sub: decoded.sub, role: decoded.role } as JwtPayload;
 
   const accessToken = generateAccessTokens(payload);
-
+  res.cookie('accessToken', accessToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    maxAge: 15 * 60 * 1000,
+  });
   res.status(200).json({
     status: 'success',
     accessToken,
@@ -198,58 +200,54 @@ export async function sendVerificationOtp(req: Request, res: Response) {
 }
 
 export async function verifyOtp(req: Request, res: Response) {
-  const { otp, email } = req.body;
+  try {
+    const { otp, email } = req.body;
 
-  const record = await OTPModel.findOne({ email, type: 'verify' }).sort({
-    createdAt: -1,
-  });
+    const verified = await AuthService.verifyOtp(email, otp);
 
-  if (!record) {
-    throw createHttpError(400, 'OTP not found');
+    if (!verified) {
+      throw createHttpError(400, 'Invalid or expired OTP');
+    }
+
+    const user = await AuthService.findByEmail(email);
+
+    const payload = {
+      sub: String(user?._id),
+      role: user?.role ?? 'customer',
+    };
+
+    const accessToken = generateAccessTokens(payload);
+    const refreshToken = generateRefreshTokens(payload);
+
+    res.cookie('accessToken', accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+      maxAge: 15 * 60 * 1000, // 15 min
+    });
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Email verified successfully',
+      token: { accessToken },
+    });
+  } catch (error) {
+    if (createHttpError.isHttpError(error)) {
+      throw error;
+    }
+    throw createHttpError(500, 'Internal server error');
   }
-
-  if (record.expiresAt < new Date()) {
-    await OTPModel.deleteMany({ email });
-    throw createHttpError(400, 'OTP expired.');
-  }
-
-  if (Number(record.otp) !== Number(otp)) {
-    throw createHttpError(400, 'Invalid OTP');
-  }
-
-  const user = await AuthService.findByEmail(email);
-
-  await user?.updateOne({ isEmailVerified: true });
-
-  const payload = {
-    sub: String(user?._id),
-    role: user?.role,
-  };
-
-  const accessToken = generateAccessTokens(payload);
-  const refreshToken = generateRefreshTokens(payload);
-
-  res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  });
-
-  res.status(200).json({
-    status: 'success',
-    message: 'Email verified successfully',
-    token: {
-      accessToken,
-    },
-  });
 }
 
 export async function resetPassword(req: Request, res: Response) {
   const id = req?.user?.sub as string;
   const { password } = req.body;
-
-  console.log(password);
 
   const salt = await bcrypt.genSalt(10);
   const hashedPassword = await bcrypt.hash(password, salt);
@@ -324,12 +322,17 @@ export async function verifyOtpForForgot(req: Request, res: Response) {
 
   const payload = {
     sub: String(user?._id),
-    role: user?.role,
+    role: user?.role ?? 'customer',
   };
 
   const accessToken = generateAccessTokens(payload);
   const refreshToken = generateRefreshTokens(payload);
-
+  res.cookie('accessToken', accessToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+    maxAge: 15 * 60 * 1000,
+  });
   res.cookie('refreshToken', refreshToken, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

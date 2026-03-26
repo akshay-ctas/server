@@ -5,7 +5,6 @@ declare global {
   namespace Express {
     interface Request {
       log?: winston.Logger;
-      files?: any;
       user?: {
         sub: string;
       };
@@ -14,3 +13,10 @@ declare global {
 }
 
 export {};
+export type OrderStatus =
+  | 'pending'
+  | 'confirmed'
+  | 'processing'
+  | 'shipped'
+  | 'delivered'
+  | 'cancelled';
