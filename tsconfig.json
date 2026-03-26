@@ -5,12 +5,13 @@
     "moduleResolution": "NodeNext",
     "outDir": "./dist",
     "rootDir": "./src",
-    "strict": true,
+    "strict": false,
     "esModuleInterop": true,
+    "lib": ["ES2020"],
+    "types": ["node"],
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "typeRoots": ["./src/types", "./node_modules/@types"],
-    "lib": ["ES2022"]
+    "noImplicitAny": false
   },
   "include": ["src/**/*", "prisma/**/*", "generated/**/*"],
   "exclude": ["node_modules", "dist"]
