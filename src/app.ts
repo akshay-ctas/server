@@ -25,7 +25,7 @@ const httpServer = http.createServer(app);
 const io = new Server(httpServer, {
   cors: {
     origin: [
-      'https://client-ui-kendrascott-eej8mb9qu-akshay-ctas-projects.vercel.app/',
+      'https://client-ui-kendrascott.vercel.app/',
       'http://localhost:3000',
       'http://localhost:3001',
       'https://josefa-unfatiguing-aggravatingly.ngrok-free.dev/',
@@ -39,7 +39,7 @@ app.use(helmet());
 app.use(
   cors({
     origin: [
-      'https://client-ui-kendrascott-eej8mb9qu-akshay-ctas-projects.vercel.app/',
+      'https://client-ui-kendrascott.vercel.app/',
       'http://localhost:3000',
       'http://localhost:3001',
       'https://josefa-unfatiguing-aggravatingly.ngrok-free.dev/',
