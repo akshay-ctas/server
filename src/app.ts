@@ -24,7 +24,12 @@ const httpServer = http.createServer(app);
 
 const io = new Server(httpServer, {
   cors: {
-    origin: ['http://localhost:3000', 'http://localhost:3001',"https://josefa-unfatiguing-aggravatingly.ngrok-free.dev/"],
+    origin: [
+      'https://client-ui-kendrascott-eej8mb9qu-akshay-ctas-projects.vercel.app/',
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'https://josefa-unfatiguing-aggravatingly.ngrok-free.dev/',
+    ],
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -33,7 +38,12 @@ const io = new Server(httpServer, {
 app.use(helmet());
 app.use(
   cors({
-    origin: ['http://localhost:3000', 'http://localhost:3001',"https://josefa-unfatiguing-aggravatingly.ngrok-free.dev/"],
+    origin: [
+      'https://client-ui-kendrascott-eej8mb9qu-akshay-ctas-projects.vercel.app/',
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'https://josefa-unfatiguing-aggravatingly.ngrok-free.dev/',
+    ],
     credentials: true,
   })
 );
@@ -82,6 +92,10 @@ app.use('/api/order', orderRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+
+app.get('/health', (req, res) => {
+  res.status(200).json({ success: true });
+});
 
 app.use('*', (req, res) => {
   res.status(404).json({ error: 'Not found' });
